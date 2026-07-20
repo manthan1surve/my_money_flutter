@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
 
 import '../../core/theme.dart';
 import '../components/app_background.dart';
@@ -31,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   
   static const double itemWidth = 80.0;
   int _lastTapTime = 0;
+  int _lastTapIndex = -1;
 
   bool _isSyncing = false;
 
@@ -100,36 +102,46 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
   }
 
-  void _syncPageToCarousel(int pageIndex) {
-    if (_isSyncing) return;
-    _isSyncing = true;
-    
-    if (_pageController.hasClients) {
-      _pageController.animateToPage(
-        pageIndex,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-      ).then((_) => _isSyncing = false);
-    } else {
-      _isSyncing = false;
-    }
-  }
-
   void _handleMonthTap(int index, AppProvider provider) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final targetIndex = (now - _lastTapTime < 300) ? _initialIndex : index;
-    final targetDate = (now - _lastTapTime < 300) ? DateTime.now() : _months[index];
-    
-    _isSyncing = true;
-    Future.wait([
-      if (_scrollController.hasClients)
-        _scrollController.animateTo(targetIndex * itemWidth, duration: const Duration(milliseconds: 400), curve: Curves.easeOutCubic),
-      if (_pageController.hasClients)
-        _pageController.animateToPage(targetIndex, duration: const Duration(milliseconds: 400), curve: Curves.easeOutCubic),
-    ]).then((_) => _isSyncing = false);
+    final isDoubleTap = (now - _lastTapTime < 300) && (_lastTapIndex == index);
+
+    final targetIndex = isDoubleTap ? _initialIndex : index;
+    final targetDate = isDoubleTap ? DateTime.now() : _months[index];
 
     provider.setCurrentDate(targetDate);
-    _lastTapTime = now;
+
+    _isSyncing = true;
+    if (isDoubleTap) {
+      // Jump the page view instantly (no scroll-through-every-page jank),
+      // then smoothly slide the month carousel to the target position.
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(targetIndex);
+      }
+      if (_scrollController.hasClients) {
+        _scrollController
+            .animateTo(
+              targetIndex * itemWidth,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOutCubic,
+            )
+            .then((_) => _isSyncing = false);
+      } else {
+        _isSyncing = false;
+      }
+      // Reset so next tap starts fresh
+      _lastTapTime = 0;
+      _lastTapIndex = -1;
+    } else {
+      Future.wait([
+        if (_scrollController.hasClients)
+          _scrollController.animateTo(targetIndex * itemWidth, duration: const Duration(milliseconds: 400), curve: Curves.easeOutCubic),
+        if (_pageController.hasClients)
+          _pageController.animateToPage(targetIndex, duration: const Duration(milliseconds: 400), curve: Curves.easeOutCubic),
+      ]).then((_) => _isSyncing = false);
+      _lastTapTime = now;
+      _lastTapIndex = index;
+    }
   }
 
   @override
@@ -142,10 +154,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     super.dispose();
   }
 
-  List<dynamic> _getGroupedTransactionsForMonth(DateTime monthDate, String searchQuery, AppProvider provider) {
-    if (_cachedTransactions != provider.transactions || _cachedSearchQuery != searchQuery) {
+  List<dynamic> _getGroupedTransactionsForMonth(DateTime monthDate, String searchQuery, List<TransactionModel> transactions, List<CategoryModel> categories) {
+    if (_cachedTransactions != transactions || _cachedSearchQuery != searchQuery) {
       _groupedTransactionsCache.clear();
-      _cachedTransactions = provider.transactions;
+      _cachedTransactions = transactions;
       _cachedSearchQuery = searchQuery;
     }
 
@@ -154,14 +166,17 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       return _groupedTransactionsCache[cacheKey]!;
     }
 
-    final currentMonthTransactions = provider.transactions.where((t) {
+    final Map<String, CategoryModel> categoryMap = { for (var c in categories) c.id : c };
+    final CategoryModel unknownCat = CategoryModel(id: '', name: 'Uncategorized', icon: '❓', type: '');
+    final String q = searchQuery.toLowerCase();
+
+    final currentMonthTransactions = transactions.where((t) {
       final date = DateTime.fromMillisecondsSinceEpoch(t.date);
       final isCurrentMonth = date.month == monthDate.month && date.year == monthDate.year;
       if (!isCurrentMonth) return false;
 
-      if (searchQuery.isEmpty) return true;
-      final q = searchQuery.toLowerCase();
-      final cat = provider.categories.firstWhere((c) => c.id == t.categoryId, orElse: () => CategoryModel(id: '', name: 'Uncategorized', icon: '❓', type: ''));
+      if (q.isEmpty) return true;
+      final cat = categoryMap[t.categoryId] ?? unknownCat;
       final noteMatch = (t.note).toLowerCase().contains(q);
       final catMatch = cat.name.toLowerCase().contains(q);
       return noteMatch || catMatch;
@@ -195,7 +210,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context);
+    final transactions = context.select((AppProvider p) => p.transactions);
+    final categories = context.select((AppProvider p) => p.categories);
+    final currentDate = context.select((AppProvider p) => p.currentDate);
+    final currency = context.select((AppProvider p) => p.currency);
+    final user = context.select((AppProvider p) => p.user);
     final width = MediaQuery.of(context).size.width;
 
     return AppBackground(
@@ -217,7 +236,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         builder: (context, child) {
                           return Opacity(
                             opacity: (1.0 - _searchAnim.value).clamp(0.0, 1.0),
-                            child: Text("Ducat", style: AppTypography.screenTitle),
+                            child: Text(
+                              user?.name != null ? "Welcome, ${user!.name}" : "Ducat",
+                              style: user?.name != null
+                                  ? AppTypography.screenTitle.copyWith(fontSize: 24)
+                                  : AppTypography.screenTitle,
+                            ),
                           );
                         },
                       ),
@@ -303,14 +327,29 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                                   );
                                 },
                                 child: ClipOval(
-                                  child: Image.asset(
-                                    'assets/avatar.png',
-                                    width: 24,
-                                    height: 24,
-                                    fit: BoxFit.cover,
-                                    color: Colors.white,
-                                    colorBlendMode: BlendMode.srcIn,
-                                  ),
+                                  child: user?.photoPath != null
+                                      ? Image.file(
+                                          File(user!.photoPath!),
+                                          width: 24,
+                                          height: 24,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Image.asset(
+                                            'assets/avatar.png',
+                                            width: 24,
+                                            height: 24,
+                                            fit: BoxFit.cover,
+                                            color: Colors.white,
+                                            colorBlendMode: BlendMode.srcIn,
+                                          ),
+                                        )
+                                      : Image.asset(
+                                          'assets/avatar.png',
+                                          width: 24,
+                                          height: 24,
+                                          fit: BoxFit.cover,
+                                          color: Colors.white,
+                                          colorBlendMode: BlendMode.srcIn,
+                                        ),
                                 ),
                               ),
                             ),
@@ -335,32 +374,45 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ),
               child: NotificationListener<ScrollNotification>(
                 onNotification: (notification) {
+                  if (_isSyncing) return false;
                   if (notification is ScrollEndNotification && notification.depth == 0) {
-                    final index = (_scrollController.offset / itemWidth).round();
-                    if (index >= 0 && index < _months.length) {
-                      final selected = _months[index];
-                      if (selected.month != provider.currentDate.month || selected.year != provider.currentDate.year) {
-                        provider.setCurrentDate(selected);
-                      }
-                      _syncPageToCarousel(index);
+                    final index = (_scrollController.offset / itemWidth).round().clamp(0, _months.length - 1);
+                    final selected = _months[index];
+                    if (selected.month != currentDate.month || selected.year != currentDate.year) {
+                      context.read<AppProvider>().setCurrentDate(selected);
                     }
+                    _isSyncing = true;
+                    Future.wait([
+                      if (_scrollController.hasClients)
+                        _scrollController.animateTo(
+                          index * itemWidth,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOutCubic,
+                        ),
+                      if (_pageController.hasClients)
+                        _pageController.animateToPage(
+                          index,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOutCubic,
+                        ),
+                    ]).then((_) => _isSyncing = false);
                   }
                   return false;
                 },
                 child: ListView.builder(
                   controller: _scrollController,
                   scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(), 
+                  physics: SnappingScrollPhysics(itemExtent: itemWidth, parent: const BouncingScrollPhysics()),
                   itemExtent: itemWidth,
                   padding: EdgeInsets.symmetric(horizontal: (width - 20 - itemWidth) / 2),
                   itemCount: _months.length,
                   itemBuilder: (context, index) {
                     final item = _months[index];
-                    final isActive = item.month == provider.currentDate.month && item.year == provider.currentDate.year;
+                    final isActive = item.month == currentDate.month && item.year == currentDate.year;
                     
                     return GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () => _handleMonthTap(index, provider),
+                      onTap: () => _handleMonthTap(index, context.read<AppProvider>()),
                       child: Container(
                         width: itemWidth,
                         alignment: Alignment.center,
@@ -410,19 +462,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 itemCount: _months.length,
                 onPageChanged: (index) {
                   final selected = _months[index];
-                  if (selected.month != provider.currentDate.month || selected.year != provider.currentDate.year) {
-                    provider.setCurrentDate(selected);
+                  if (selected.month != currentDate.month || selected.year != currentDate.year) {
+                    context.read<AppProvider>().setCurrentDate(selected);
                   }
                   _syncCarouselToPage(index);
                 },
                 itemBuilder: (context, index) {
                   final monthDate = _months[index];
-                  final monthTransactions = _getGroupedTransactionsForMonth(monthDate, _searchQuery, provider);
+                  final monthTransactions = _getGroupedTransactionsForMonth(monthDate, _searchQuery, transactions, categories);
                   
                   return MonthTransactionsView(
                     transactions: monthTransactions,
-                    categories: provider.categories,
-                    currencySymbol: provider.currency.symbol,
+                    categories: categories,
+                    currencySymbol: currency.symbol,
                   );
                 },
               ),
@@ -476,4 +528,59 @@ class MonthTransactionsView extends StatelessWidget {
       },
     );
   }
+}
+
+class SnappingScrollPhysics extends ScrollPhysics {
+  final double itemExtent;
+
+  const SnappingScrollPhysics({required this.itemExtent, super.parent});
+
+  @override
+  SnappingScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return SnappingScrollPhysics(itemExtent: itemExtent, parent: buildParent(ancestor));
+  }
+
+  @override
+  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
+    if ((velocity <= 0.0 && position.pixels <= position.minScrollExtent) ||
+        (velocity >= 0.0 && position.pixels >= position.maxScrollExtent)) {
+      return super.createBallisticSimulation(position, velocity);
+    }
+    
+    final Tolerance tolerance = toleranceFor(position);
+    final double currentIndex = position.pixels / itemExtent;
+    double targetIndex;
+    
+    if (velocity.abs() < tolerance.velocity) {
+      targetIndex = currentIndex.roundToDouble();
+    } else {
+      // Predict a natural stopping distance (0.25 is a good factor for smooth scrolling)
+      double expectedPixels = position.pixels + velocity * 0.25; 
+      targetIndex = (expectedPixels / itemExtent).roundToDouble();
+      
+      // Ensure we at least move 1 item in the direction of the fling
+      if (velocity > 0 && targetIndex <= currentIndex) {
+        targetIndex = currentIndex.ceilToDouble();
+      } else if (velocity < 0 && targetIndex >= currentIndex) {
+        targetIndex = currentIndex.floorToDouble();
+      }
+    }
+    
+    final double targetPixels = (targetIndex * itemExtent).clamp(position.minScrollExtent, position.maxScrollExtent);
+    
+    if ((targetPixels - position.pixels).abs() > 0.001) {
+      return ScrollSpringSimulation(
+        spring,
+        position.pixels,
+        targetPixels,
+        velocity,
+        tolerance: tolerance,
+      );
+    }
+    
+    return null;
+  }
+
+  @override
+  bool get allowImplicitScrolling => false;
 }

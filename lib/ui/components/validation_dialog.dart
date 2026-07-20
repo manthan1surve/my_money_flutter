@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'glass_card.dart';
 
 void showValidationDialog(BuildContext context, String message) {
   showDialog(
@@ -7,21 +8,9 @@ void showValidationDialog(BuildContext context, String message) {
     builder: (context) => Center(
       child: Material(
         color: Colors.transparent,
-        child: Container(
+        child: GlassCard(
           margin: const EdgeInsets.symmetric(horizontal: 40),
           padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.5),
-                blurRadius: 30,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

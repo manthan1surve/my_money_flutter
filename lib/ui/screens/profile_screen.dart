@@ -88,6 +88,14 @@ class ProfileScreen extends StatelessWidget {
                                       width: 80,
                                       height: 80,
                                       fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) => Image.asset(
+                                        'assets/avatar.png',
+                                        width: 80,
+                                        height: 80,
+                                        fit: BoxFit.cover,
+                                        color: Colors.white,
+                                        colorBlendMode: BlendMode.srcIn,
+                                      ),
                                     )
                                   : Image.asset(
                                       'assets/avatar.png',
@@ -111,9 +119,20 @@ class ProfileScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 15),
-                      Text(
-                        user?.email.split('@').first ?? 'User',
-                        style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            user?.name ?? user?.email.split('@').first ?? 'User',
+                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => _showEditNameDialog(
+                                context, provider, user?.name ?? user?.email.split('@').first ?? 'User'),
+                            child: const Icon(Icons.edit, color: Colors.white70, size: 18),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 5),
                       Text(
@@ -157,8 +176,6 @@ class ProfileScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 10),
 
-                            _buildMenuItem(Icons.notifications_outlined, 'Notifications', context),
-                            _buildMenuItem(Icons.shield_outlined, 'Security', context),
                             _buildMenuItem(Icons.download_outlined, 'Import Records (CSV)', context, onTap: () async {
                               final progressNotifier = ValueNotifier<ImportStatus>(
                                 ImportStatus(isDone: false, current: 0, total: 0)
@@ -195,14 +212,13 @@ class ProfileScreen extends StatelessWidget {
 
                                     if (overwrite == null) return null;
 
-                                    if (context.mounted) {
-                                      dialogShown = true;
-                                      showDialog(
-                                        context: context,
-                                        barrierDismissible: false,
-                                        builder: (ctx) => ImportProgressDialog(notifier: progressNotifier),
-                                      );
-                                    }
+                                    if (!context.mounted) return null;
+                                    dialogShown = true;
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (ctx) => ImportProgressDialog(notifier: progressNotifier),
+                                    );
                                     return overwrite;
                                   },
                                   onProgress: (current, total) {
@@ -222,14 +238,18 @@ class ProfileScreen extends StatelessWidget {
                                   );
                                 }
                               } catch (e) {
+                                String errorMsg = e.toString();
+                                if (errorMsg.startsWith('Exception: ')) {
+                                  errorMsg = errorMsg.substring(11);
+                                }
                                 if (dialogShown) {
                                   progressNotifier.value = ImportStatus(
                                     isDone: true,
-                                    error: e.toString(),
+                                    error: errorMsg,
                                   );
                                 } else {
                                   if (context.mounted) {
-                                    showValidationDialog(context, 'Import failed: $e');
+                                    showValidationDialog(context, errorMsg);
                                   }
                                 }
                               }
@@ -262,7 +282,112 @@ class ProfileScreen extends StatelessWidget {
                                 }
                               }
                             }),
-                            _buildMenuItem(Icons.help_outline, 'Help & Support', context),
+                            _buildMenuItem(Icons.cloud_upload_outlined, 'Backup to Cloud', context, onTap: () async {
+                              try {
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (ctx) => const AlertDialog(
+                                    backgroundColor: Color(0xFF1E1E1E),
+                                    content: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(width: 24, height: 24, child: LoadingSpinner()),
+                                        SizedBox(width: 20),
+                                        Text("Backing up to cloud...", style: TextStyle(color: Colors.white)),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                                await provider.manualBackupToCloud();
+                                if (context.mounted) {
+                                  Navigator.of(context).pop(); // dismiss loading dialog
+                                  showDialog(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      backgroundColor: const Color(0xFF1E1E1E),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: const Row(
+                                        children: [
+                                          Icon(Icons.check_circle_outline, color: Colors.green, size: 24),
+                                          SizedBox(width: 10),
+                                          Text('Backup Successful', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                      content: const Text(
+                                        'Your data has been backed up to the cloud successfully.',
+                                        style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                                      ),
+                                      actionsAlignment: MainAxisAlignment.end,
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.of(ctx).pop(),
+                                          child: const Text('OK', style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.w600)),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  Navigator.of(context).pop();
+                                  showValidationDialog(context, 'Backup failed: $e');
+                                }
+                              }
+                            }),
+                            _buildMenuItem(Icons.cloud_download_outlined, 'Restore from Cloud', context, onTap: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: const Color(0xFF1E1E1E),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  title: const Text('Restore from Cloud?', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                  content: const Text('This will overwrite your current local data with the latest cloud backup. Continue?', style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)),
+                                  actionsAlignment: MainAxisAlignment.end,
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(false),
+                                      child: const Text('Cancel', style: TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(true),
+                                      child: const Text('Restore', style: TextStyle(color: Colors.blue, fontSize: 14, fontWeight: FontWeight.w600)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true && context.mounted) {
+                                try {
+                                  showDialog(
+                                    context: context,
+                                    barrierDismissible: false,
+                                    builder: (ctx) => const AlertDialog(
+                                      backgroundColor: Color(0xFF1E1E1E),
+                                      content: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          SizedBox(width: 24, height: 24, child: LoadingSpinner()),
+                                          SizedBox(width: 20),
+                                          Text("Restoring from cloud...", style: TextStyle(color: Colors.white)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                  await provider.manualRestoreFromCloud();
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Restore from cloud successful!'))
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                    showValidationDialog(context, 'Restore failed: $e');
+                                  }
+                                }
+                              }
+                            }),
                             _buildMenuItem(Icons.delete_forever_outlined, 'Clear All Data', context, onTap: () async {
                               final confirm = await showDialog<bool>(
                                 context: context,
@@ -384,6 +509,45 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _showEditNameDialog(BuildContext context, AppProvider provider, String currentName) async {
+    final TextEditingController controller = TextEditingController(text: currentName);
+    return showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text('Edit Username', style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Enter new username',
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
+              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+            ),
+            TextButton(
+              onPressed: () {
+                if (controller.text.trim().isNotEmpty) {
+                  provider.updateUserName(controller.text.trim());
+                }
+                Navigator.pop(context);
+              },
+              child: const Text('Save', style: TextStyle(color: Color(0xFF6366F1))),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class ImportStatus {
@@ -414,27 +578,40 @@ class _ImportProgressDialogState extends State<ImportProgressDialog> {
         final String percentText = (percent * 100).toStringAsFixed(0);
 
         if (status.error != null) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(
-              children: [
-                Icon(Icons.error_outline, color: Colors.red, size: 24),
-                SizedBox(width: 10),
-                Text("Import Failed", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            content: Text(
-              status.error!,
-              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-            ),
-            actionsAlignment: MainAxisAlignment.end,
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text("OK", style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+          return Center(
+            child: Material(
+              color: Colors.transparent,
+              child: GlassCard(
+                margin: const EdgeInsets.symmetric(horizontal: 40),
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red, size: 24),
+                        SizedBox(width: 10),
+                        Text("Import Failed", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 15),
+                    Text(
+                      status.error!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                    ),
+                    const SizedBox(height: 20),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text("OK", style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           );
         }
 

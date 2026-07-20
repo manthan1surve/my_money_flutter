@@ -67,6 +67,8 @@ class CustomLineChart extends StatefulWidget {
   final String currencySymbol;
   final bool showAllLabels;
   final bool isExpense;
+  final int? defaultIndex;
+  final ValueChanged<Map<String, dynamic>>? onActiveItemChanged;
 
   const CustomLineChart({
     super.key,
@@ -76,6 +78,8 @@ class CustomLineChart extends StatefulWidget {
     required this.currencySymbol,
     required this.showAllLabels,
     required this.isExpense,
+    this.defaultIndex,
+    this.onActiveItemChanged,
   });
 
   @override
@@ -83,13 +87,34 @@ class CustomLineChart extends StatefulWidget {
 }
 
 class _CustomLineChartState extends State<CustomLineChart> {
-  int _activeIndex = -1; // -1 = show last point as default
+  late ValueNotifier<int> _activeIndexNotifier;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeIndexNotifier = ValueNotifier<int>(widget.defaultIndex ?? -1);
+  }
+
+  @override
+  void didUpdateWidget(CustomLineChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.defaultIndex != oldWidget.defaultIndex || widget.data != oldWidget.data) {
+      _activeIndexNotifier.value = widget.defaultIndex ?? -1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeIndexNotifier.dispose();
+    super.dispose();
+  }
+
   final double _padL = 0;
   final double _padR = 0;
-  final double _padTop = 70;
+  final double _padTop = 20;
   final double _padBottom = 28;
 
-  int get _displayIndex => _activeIndex < 0 ? widget.data.length - 1 : _activeIndex;
+  int _getDisplayIndex(int index) => index < 0 ? widget.data.length - 1 : index;
 
   double _getNiceMax() {
     if (widget.maxAmount <= 0) return 100;
@@ -105,10 +130,9 @@ class _CustomLineChartState extends State<CustomLineChart> {
     return (widget.maxAmount / step).ceil() * step;
   }
 
-  Offset _pointAt(int index, Size size) {
+  Offset _pointAt(int index, Size size, double niceMax) {
     final graphW = size.width - _padL - _padR;
     final graphH = size.height - _padTop - _padBottom;
-    final niceMax = _getNiceMax();
     double x = widget.data.length > 1
         ? _padL + (index / (widget.data.length - 1)) * graphW
         : _padL + graphW / 2;
@@ -122,29 +146,19 @@ class _CustomLineChartState extends State<CustomLineChart> {
     final relX = (d.localPosition.dx - _padL).clamp(0.0, graphW);
     final frac = relX / graphW;
     final idx = (frac * (widget.data.length - 1)).round().clamp(0, widget.data.length - 1);
-    if (idx != _activeIndex) setState(() => _activeIndex = idx);
-  }
-
-  String _pctChange() {
-    if (widget.data.length < 2) return '';
-    final first = (widget.data.first['total'] as num).toDouble();
-    final last = (widget.data.last['total'] as num).toDouble();
-    if (first == 0) return '';
-    final pct = ((last - first) / first * 100);
-    return '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(0)}%';
+    if (idx != _activeIndexNotifier.value) {
+      _activeIndexNotifier.value = idx;
+      widget.onActiveItemChanged?.call(widget.data[_getDisplayIndex(idx)]);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.data.isEmpty) return const SizedBox();
     final niceMax = _getNiceMax();
-    final activeData = widget.data[_displayIndex];
-    final pct = _pctChange();
-    final isUp = !pct.startsWith('-');
 
     return LayoutBuilder(builder: (context, constraints) {
       final size = Size(constraints.maxWidth, constraints.maxHeight);
-      final activePt = _pointAt(_displayIndex, size);
 
       return GestureDetector(
         onPanUpdate: (d) => _onPanUpdate(d, size),
@@ -157,96 +171,94 @@ class _CustomLineChartState extends State<CustomLineChart> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Chart painter
+            // Static Chart Painter (always rendered, cached by RepaintBoundary)
             Positioned.fill(
-              child: CustomPaint(
-                painter: _LineChartPainter(
-                  data: widget.data,
-                  niceMax: niceMax,
-                  color: widget.color,
-                  activeIndex: _displayIndex,
-                  padL: _padL,
-                  padR: _padR,
-                  padTop: _padTop,
-                  padBottom: _padBottom,
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _StaticLineChartPainter(
+                    data: widget.data,
+                    niceMax: niceMax,
+                    color: widget.color,
+                    padL: _padL,
+                    padR: _padR,
+                    padTop: _padTop,
+                    padBottom: _padBottom,
+                  ),
                 ),
               ),
             ),
 
-            // Summary top-left
-            Positioned(
-              left: 16,
-              top: 14,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.isExpense ? 'Total Expense' : 'Money Received',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 11, letterSpacing: 0.3),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${widget.currencySymbol}${activeData['total'].round()}',
-                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                  ),
-                ],
-              ),
-            ),
+            // Dynamic Active Dot and Tooltip
+            ValueListenableBuilder<int>(
+              valueListenable: _activeIndexNotifier,
+              builder: (context, activeIndex, _) {
+                final displayIdx = _getDisplayIndex(activeIndex);
+                final activePt = _pointAt(displayIdx, size, niceMax);
+                final activeData = widget.data[displayIdx];
 
-            // Percentage change top-right
-            if (pct.isNotEmpty)
-              Positioned(
-                right: 16,
-                top: 20,
-                child: Row(
+                return Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    Text(
-                      pct,
-                      style: TextStyle(
-                        color: isUp ? const Color(0xFF00FE06) : const Color(0xFFFE0000),
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
+                    // Active Dot Painter
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _ActiveDotPainter(
+                          data: widget.data,
+                          niceMax: niceMax,
+                          color: widget.color,
+                          activeIndex: displayIdx,
+                          padL: _padL,
+                          padR: _padR,
+                          padTop: _padTop,
+                          padBottom: _padBottom,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 2),
-                    Icon(
-                      isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
-                      color: isUp ? const Color(0xFF00FE06) : const Color(0xFFFE0000),
-                      size: 14,
-                    ),
-                  ],
-                ),
-              ),
 
-            // Floating date & amount label above active point
-            Positioned(
-              left: (activePt.dx - 45).clamp(4.0, size.width - 90),
-              top: (activePt.dy - 54).clamp(68.0, size.height - 40),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A3A),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8)],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      activeData['label'],
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${widget.currencySymbol}${activeData['total'].round()}',
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    // Floating date & amount label above active point
+                    Positioned(
+                      left: (activePt.dx - 45).clamp(4.0, size.width - 90),
+                      top: (activePt.dy - 54).clamp(68.0, size.height - 40),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: BackdropFilter(
+                            filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    activeData['label'],
+                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${widget.currencySymbol}${activeData['total'].round()}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ],
-                ),
-              ),
+                );
+              },
             ),
 
             // X-axis: labels
@@ -307,18 +319,16 @@ class _CustomLineChartState extends State<CustomLineChart> {
   }
 }
 
-class _LineChartPainter extends CustomPainter {
+class _StaticLineChartPainter extends CustomPainter {
   final List<Map<String, dynamic>> data;
   final double niceMax;
   final Color color;
-  final int activeIndex;
   final double padL, padR, padTop, padBottom;
 
-  _LineChartPainter({
+  _StaticLineChartPainter({
     required this.data,
     required this.niceMax,
     required this.color,
-    required this.activeIndex,
     required this.padL,
     required this.padR,
     required this.padTop,
@@ -340,6 +350,30 @@ class _LineChartPainter extends CustomPainter {
     if (data.isEmpty) return;
     final points = _buildPoints(size);
     final graphBottom = size.height - padBottom;
+    final graphLeft = padL;
+    final graphRight = size.width - padR;
+
+    // Draw background grid lines (subtle white grid)
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.05)
+      ..strokeWidth = 0.6
+      ..style = PaintingStyle.stroke;
+
+    const double gridSpacing = 24.0;
+
+    // Horizontal grid lines
+    double y = graphBottom;
+    while (y >= 0) {
+      canvas.drawLine(Offset(graphLeft, y), Offset(graphRight, y), gridPaint);
+      y -= gridSpacing;
+    }
+
+    // Vertical grid lines
+    double x = graphLeft;
+    while (x <= graphRight) {
+      canvas.drawLine(Offset(x, 0), Offset(x, graphBottom), gridPaint);
+      x += gridSpacing;
+    }
 
     // Build smooth bezier path
     final path = Path();
@@ -383,8 +417,47 @@ class _LineChartPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.5
       ..strokeCap = StrokeCap.round);
+  }
 
-    // Active dot
+  @override
+  bool shouldRepaint(covariant _StaticLineChartPainter old) =>
+      old.data != data || old.niceMax != niceMax;
+}
+
+class _ActiveDotPainter extends CustomPainter {
+  final List<Map<String, dynamic>> data;
+  final double niceMax;
+  final Color color;
+  final int activeIndex;
+  final double padL, padR, padTop, padBottom;
+
+  _ActiveDotPainter({
+    required this.data,
+    required this.niceMax,
+    required this.color,
+    required this.activeIndex,
+    required this.padL,
+    required this.padR,
+    required this.padTop,
+    required this.padBottom,
+  });
+
+  List<Offset> _buildPoints(Size size) {
+    final graphW = size.width - padL - padR;
+    final graphH = size.height - padTop - padBottom;
+    return List.generate(data.length, (i) {
+      double x = data.length > 1 ? padL + (i / (data.length - 1)) * graphW : padL + graphW / 2;
+      double yRatio = niceMax > 0 ? (data[i]['total'] as num).toDouble() / niceMax : 0;
+      return Offset(x, padTop + graphH - (yRatio.clamp(0.0, 1.0) * graphH));
+    });
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (data.isEmpty || activeIndex < 0 || activeIndex >= data.length) return;
+    final points = _buildPoints(size);
+    final graphBottom = size.height - padBottom;
+
     final pt = points[activeIndex];
 
     // Vertical dashed line
@@ -406,8 +479,8 @@ class _LineChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _LineChartPainter old) =>
-      old.activeIndex != activeIndex || old.data != data;
+  bool shouldRepaint(covariant _ActiveDotPainter old) =>
+      old.activeIndex != activeIndex || old.data != data || old.niceMax != niceMax;
 }
 
 
@@ -429,6 +502,22 @@ class CustomGroupedBarChart extends StatefulWidget {
 
 class _CustomGroupedBarChartState extends State<CustomGroupedBarChart> {
   int? _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.data.isNotEmpty) {
+      _selectedIndex = widget.data.length - 1;
+    }
+  }
+
+  @override
+  void didUpdateWidget(CustomGroupedBarChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.data != oldWidget.data && widget.data.isNotEmpty) {
+      _selectedIndex = widget.data.length - 1;
+    }
+  }
 
   List<double> _getNiceTicks() {
     double niceMax = widget.maxAmount;
@@ -495,194 +584,207 @@ class _CustomGroupedBarChartState extends State<CustomGroupedBarChart> {
 
         return GestureDetector(
           onTapDown: (_) => setState(() => _selectedIndex = null),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-          Positioned(
-            top: 15,
-            right: 20,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: _selectedIndex == null ? 1.0 : 0.0,
-              child: Row(
-                children: [
-                  Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF00FE06), borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 5),
-                  Text("Income", style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 10)),
-                  const SizedBox(width: 15),
-                  Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFFFE0000), borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 5),
-                  Text("Expense", style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 10)),
-                ],
+          child: RepaintBoundary(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+            Positioned(
+              top: 15,
+              right: 20,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: _selectedIndex == null ? 1.0 : 0.0,
+                child: Row(
+                  children: [
+                    Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFF00FE06), borderRadius: BorderRadius.circular(2))),
+                    const SizedBox(width: 5),
+                    Text("Income", style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 10)),
+                    const SizedBox(width: 15),
+                    Container(width: 8, height: 8, decoration: BoxDecoration(color: const Color(0xFFFE0000), borderRadius: BorderRadius.circular(2))),
+                    const SizedBox(width: 5),
+                    Text("Expense", style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 10)),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          Positioned(
-            left: 5,
-            top: 23,
-            bottom: 23,
-            width: 35,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: ticks.map((t) => Text(_formatY(t), style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12))).toList(),
+            Positioned(
+              left: 5,
+              top: 23,
+              bottom: 23,
+              width: 35,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: ticks.map((t) => Text(_formatY(t), style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12))).toList(),
+              ),
             ),
-          ),
 
-          Positioned(
-            left: 45,
-            right: 20,
-            top: 30,
-            bottom: 30,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: ticks.map((t) => Container(height: 1, color: Colors.white.withValues(alpha: 0.05))).toList(), 
+            Positioned(
+              left: 45,
+              right: 20,
+              top: 30,
+              bottom: 30,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: ticks.map((t) => Container(height: 1, color: Colors.white.withValues(alpha: 0.05))).toList(), 
+              ),
             ),
-          ),
 
-          Positioned(
-            left: 45,
-            right: 20,
-            top: 30,
-            bottom: 30,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: widget.data.asMap().entries.map((entry) {
-                final int index = entry.key;
-                final item = entry.value;
-                final incPct = niceMax > 0 ? (item['income'] / niceMax) : 0.0;
-                final expPct = niceMax > 0 ? (item['expense'] / niceMax) : 0.0;
-                return Expanded(
-                  child: GestureDetector(
-                    onTapDown: (_) {
-                      setState(() {
-                        if (_selectedIndex == index) {
-                          _selectedIndex = null;
-                        } else {
-                          _selectedIndex = index;
-                        }
-                      });
-                    },
-                    child: Container(
-                      color: Colors.transparent, // Needed to catch taps
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          incPct > 0
-                              ? FractionallySizedBox(
-                                  heightFactor: incPct,
-                                  child: Container(
-                                    width: 10,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF00FE06),
-                                      borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(3)),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFF00FE06).withValues(alpha: 0.4),
-                                          blurRadius: 8,
-                                          spreadRadius: 1,
-                                          offset: const Offset(0, -2),
-                                        ),
-                                      ],
+            Positioned(
+              left: 45,
+              right: 20,
+              top: 30,
+              bottom: 30,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: widget.data.asMap().entries.map((entry) {
+                  final int index = entry.key;
+                  final item = entry.value;
+                  final incPct = niceMax > 0 ? (item['income'] / niceMax) : 0.0;
+                  final expPct = niceMax > 0 ? (item['expense'] / niceMax) : 0.0;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTapDown: (_) {
+                        setState(() {
+                          if (_selectedIndex == index) {
+                            _selectedIndex = null;
+                          } else {
+                            _selectedIndex = index;
+                          }
+                        });
+                      },
+                      child: Container(
+                        color: Colors.transparent, // Needed to catch taps
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            incPct > 0
+                                ? FractionallySizedBox(
+                                    heightFactor: incPct,
+                                    child: Container(
+                                      width: 10,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF00FE06),
+                                        borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(3)),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFF00FE06).withValues(alpha: 0.4),
+                                            blurRadius: 8,
+                                            spreadRadius: 1,
+                                            offset: const Offset(0, -2),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                )
-                              : const SizedBox(width: 10),
-                          const SizedBox(width: 4),
-                          expPct > 0
-                              ? FractionallySizedBox(
-                                  heightFactor: expPct,
-                                  child: Container(
-                                    width: 10,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFE0000),
-                                      borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(3)),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(0xFFFE0000).withValues(alpha: 0.4),
-                                          blurRadius: 8,
-                                          spreadRadius: 1,
-                                          offset: const Offset(0, -2),
-                                        ),
-                                      ],
+                                  )
+                                : const SizedBox(width: 10),
+                            const SizedBox(width: 4),
+                            expPct > 0
+                                ? FractionallySizedBox(
+                                    heightFactor: expPct,
+                                    child: Container(
+                                      width: 10,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFE0000),
+                                        borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(3)),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFFFE0000).withValues(alpha: 0.4),
+                                            blurRadius: 8,
+                                            spreadRadius: 1,
+                                            offset: const Offset(0, -2),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                )
-                              : const SizedBox(width: 10),
-                        ],
+                                  )
+                                : const SizedBox(width: 10),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+            Positioned(
+              left: 45,
+              right: 20,
+              bottom: 5,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: widget.data.map((item) => Expanded(
+                  child: Text(
+                    item['label'],
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                  ),
+                )).toList(),
+              ),
+            ),
+
+            if (_selectedIndex != null)
+              Positioned(
+                top: tooltipTop,
+                left: 0,
+                right: 0,
+                child: Align(
+                  alignment: Alignment(tooltipAlignX, 0),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "${widget.data[_selectedIndex!]['label']}: ",
+                                style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w500),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFF00FE06), borderRadius: BorderRadius.circular(3))),
+                              const SizedBox(width: 4),
+                              Text(
+                                "${widget.currencySymbol}${widget.data[_selectedIndex!]['income'].round()}",
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(width: 12),
+                              Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFFFE0000), borderRadius: BorderRadius.circular(3))),
+                              const SizedBox(width: 4),
+                              Text(
+                                "${widget.currencySymbol}${widget.data[_selectedIndex!]['expense'].round()}",
+                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          Positioned(
-            left: 45,
-            right: 20,
-            bottom: 5,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: widget.data.map((item) => Expanded(
-                child: Text(
-                  item['label'],
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                ),
-              )).toList(),
-            ),
-          ),
-
-          if (_selectedIndex != null)
-            Positioned(
-              top: tooltipTop,
-              left: 0,
-              right: 0,
-              child: Align(
-                alignment: Alignment(tooltipAlignX, 0),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A3A),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8)],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "${widget.data[_selectedIndex!]['label']}: ",
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFF00FE06), borderRadius: BorderRadius.circular(3))),
-                      const SizedBox(width: 4),
-                      Text(
-                        "${widget.currencySymbol}${widget.data[_selectedIndex!]['income'].round()}",
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFFFE0000), borderRadius: BorderRadius.circular(3))),
-                      const SizedBox(width: 4),
-                      Text(
-                        "${widget.currencySymbol}${widget.data[_selectedIndex!]['expense'].round()}",
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
                 ),
               ),
-            ),
-        ],
-      ),
-    );
+          ],
+        ),
+          ),
+        );
   },
 );
 }

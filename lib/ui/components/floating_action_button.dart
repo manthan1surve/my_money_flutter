@@ -23,6 +23,7 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
     with TickerProviderStateMixin {
   bool _isExpanded = false;
   TransactionModel? _existingTransaction;
+  int _sessionKey = 0;
 
   late AnimationController _progressController;
   late Animation<double> _progressAnim;
@@ -74,7 +75,10 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
   void _onEditRequest() {
     final tx = FloatingActionButtonMorph.editNotifier.value;
     if (tx != null) {
-      setState(() => _existingTransaction = tx);
+      setState(() {
+        _existingTransaction = tx;
+        _sessionKey = DateTime.now().millisecondsSinceEpoch;
+      });
       _expand();
     }
   }
@@ -116,7 +120,10 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
     if (_progressController.value > 0.5 || _isExpanded) {
       _collapse();
     } else {
-      setState(() => _existingTransaction = null);
+      setState(() {
+        _existingTransaction = null;
+        _sessionKey = DateTime.now().millisecondsSinceEpoch;
+      });
       _expand();
     }
   }
@@ -143,7 +150,7 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
               Listenable.merge([_progressController, _iconController, _fadeController]),
           // Rebuild form when transaction changes so it pre-fills correctly
           child: RepaintBoundary(
-            key: ValueKey(_existingTransaction?.id),
+            key: ValueKey('${_existingTransaction?.id ?? 'new'}_$_sessionKey'),
             child: AddTransactionForm(
               existingTransaction: _existingTransaction,
               onComplete: _handleComplete,

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
 import '../../providers/app_provider.dart';
 import '../../models/models.dart';
 import '../components/app_background.dart';
-import '../components/glass_card.dart';
 import '../components/blur_button.dart';
 import '../components/validation_dialog.dart';
 
@@ -85,9 +85,24 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
               ),
 
               // Add Category Form Card
-              GlassCard(
+              Container(
                 margin: const EdgeInsets.only(bottom: 30),
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: const Color(0xFF1E1E1E),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -140,7 +155,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                                     child: Center(
                                       child: Text(
                                         'Expense',
-                                        style: TextStyle(
+                                        style: GoogleFonts.castoro(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w500,
                                           color: _type == 'expense' ? Colors.black : Colors.white,
@@ -156,7 +171,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                                     child: Center(
                                       child: Text(
                                         'Income',
-                                        style: TextStyle(
+                                        style: GoogleFonts.castoro(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w500,
                                           color: _type == 'income' ? Colors.black : Colors.white,

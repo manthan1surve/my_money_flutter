@@ -61,7 +61,7 @@ class TransactionItem extends StatelessWidget {
     } catch (_) {}
 
     return GestureDetector(
-      onLongPress: () => _showDetails(context),
+      onTap: () => _showDetails(context),
       behavior: HitTestBehavior.opaque,
       child: Material(
         type: MaterialType.transparency,
@@ -92,9 +92,7 @@ class TransactionItem extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            (transaction.note.isNotEmpty)
-                                ? transaction.note
-                                : (isTransfer ? 'Transfer' : (category?.name ?? 'Transaction')),
+                            isTransfer ? 'Transfer' : (category?.name ?? 'Transaction'),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16,

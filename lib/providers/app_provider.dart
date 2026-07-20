@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/models.dart';
 import '../core/csv_parser.dart';
+import '../services/local_store.dart';
 
 class AppProvider extends ChangeNotifier {
   AppUser? user;
@@ -25,9 +26,6 @@ class AppProvider extends ChangeNotifier {
   CurrencyModel currency = CurrencyModel(code: 'USD', symbol: '\$', name: 'United States Dollar');
   DateTime currentDate = DateTime.now();
 
-  StreamSubscription? _accountsSub;
-  StreamSubscription? _transactionsSub;
-  StreamSubscription? _categoriesSub;
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -36,28 +34,43 @@ class AppProvider extends ChangeNotifier {
     _init();
   }
 
+
   Future<void> _init() async {
+    // Disable Firestore SDK disk cache — LocalStore owns all persistence.
+    _db.settings = const Settings(persistenceEnabled: false);
+
     await _loadCurrency();
     await _loadOnboardingStatus();
-    
+
 
     _auth.authStateChanges().listen((User? firebaseUser) async {
       if (firebaseUser != null) {
         final prefs = await SharedPreferences.getInstance();
-        final photoPath = prefs.getString('profile_photo_${firebaseUser.uid}');
-        user = AppUser(uid: firebaseUser.uid, email: firebaseUser.email ?? '', photoPath: photoPath);
-        _fetchUserData();
+        final rawPhotoPath = prefs.getString('profile_photo_${firebaseUser.uid}');
+        // Clear stale cached path if the file no longer exists on disk
+        String? photoPath = rawPhotoPath;
+        if (rawPhotoPath != null && !dart_io.File(rawPhotoPath).existsSync()) {
+          await prefs.remove('profile_photo_${firebaseUser.uid}');
+          photoPath = null;
+        }
+        final name = prefs.getString('profile_name_${firebaseUser.uid}');
+        user = AppUser(uid: firebaseUser.uid, email: firebaseUser.email ?? '', photoPath: photoPath, name: name);
+        // Restore photo from Firestore if not present locally
+        if (photoPath == null) {
+          _restorePhotoFromFirestore(firebaseUser.uid);
+        }
+        await _fetchUserData();
       } else {
         user = null;
         accounts = [];
         transactions = [];
         categories = [];
-        _cancelSubscriptions();
         loading = false;
         notifyListeners();
       }
     });
   }
+
 
   Future<void> _loadOnboardingStatus() async {
     try {
@@ -131,229 +144,276 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _cancelSubscriptions() {
-    _accountsSub?.cancel();
-    _transactionsSub?.cancel();
-    _categoriesSub?.cancel();
-  }
 
   Future<void> refreshData() async {
-    _cancelSubscriptions();
     await _fetchUserData();
   }
 
   Future<void> _fetchUserData() async {
     if (user == null) return;
-    
+
+    // 1. Load local cache immediately — UI renders with no network wait.
+    final localAccounts = await LocalStore.loadAccounts();
+    final localTransactions = await LocalStore.loadTransactions();
+    final localCategories = await LocalStore.loadCategories();
+    final hasCachedData = localAccounts.isNotEmpty ||
+        localTransactions.isNotEmpty ||
+        localCategories.isNotEmpty;
+
+    if (hasCachedData) {
+      accounts = localAccounts;
+      transactions = localTransactions;
+      categories = localCategories;
+      _sortAccounts();
+      loading = false;
+      notifyListeners();
+    } else {
+      loading = true;
+      notifyListeners();
+      // If there is no local data (e.g., fresh login or install), automatically attempt to restore from cloud.
+      try {
+        await manualRestoreFromCloud();
+      } catch (e) {
+        debugPrint('Auto-restore failed: $e');
+        // If it fails (e.g. offline), we stop loading so UI isn't stuck.
+        loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Manually pull data from Firestore, overriding local cache.
+  Future<void> manualRestoreFromCloud() async {
+    if (user == null) return;
     loading = true;
     notifyListeners();
-    
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    final transRef = _db.collection('users').doc(user!.uid).collection('transactions');
-    final categoriesRef = _db.collection('users').doc(user!.uid).collection('categories');
-
     try {
-      // Load user preferences from Firebase
-      final userDoc = await _db.collection('users').doc(user!.uid).get();
+      final uid = user!.uid;
+      final accountsRef = _db.collection('users').doc(uid).collection('accounts');
+      final transRef = _db.collection('users').doc(uid).collection('transactions');
+      final categoriesRef = _db.collection('users').doc(uid).collection('categories');
+
+      // Pull user currency preference.
+      final userDoc = await _db.collection('users').doc(uid).get();
       if (userDoc.exists && userDoc.data() != null && userDoc.data()!.containsKey('currency')) {
         final decoded = CurrencyModel.fromMap(userDoc.data()!['currency']);
-        
         const fixedSymbols = {
-          'INR': '₹',
-          'GBP': '£',
-          'EUR': '€',
-          'JPY': '¥',
-          'AED': 'د.إ',
+          'INR': '₹', 'GBP': '£', 'EUR': '€', 'JPY': '¥', 'AED': 'د.إ',
         };
         final correctedSymbol = fixedSymbols[decoded.code] ?? decoded.symbol;
-        
-        currency = CurrencyModel(
-          code: decoded.code,
-          symbol: correctedSymbol,
-          name: decoded.name,
-        );
-        
-        // Also update local prefs so it's ready on next immediate startup
+        currency = CurrencyModel(code: decoded.code, symbol: correctedSymbol, name: decoded.name);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_currency', json.encode(currency.toMap()));
       }
 
-
-
-      // Seed defaults if empty
       final accountsSnap = await accountsRef.get();
-      if (accountsSnap.docs.isEmpty) {
-        final now = DateTime.now().millisecondsSinceEpoch;
-        await accountsRef.add({'name': 'Bank', 'balance': 0, 'createdAt': now});
-        await accountsRef.add({'name': 'Cash', 'balance': 0, 'createdAt': now});
-        await accountsRef.add({'name': 'Savings', 'balance': 0, 'createdAt': now});
+      final results = await Future.wait([
+        transRef.orderBy('date', descending: true).limit(2000).get(),
+        categoriesRef.get(),
+      ]);
+      final transSnap = results[0];
+      final catSnap   = results[1];
+
+      accounts     = accountsSnap.docs.map((d) => Account.fromMap(d.id, d.data())).toList();
+      transactions = transSnap.docs.map((d) => TransactionModel.fromMap(d.id, d.data())).toList();
+      categories   = catSnap.docs.map((d) => CategoryModel.fromMap(d.id, d.data())).toList();
+
+      _sortAccounts();
+      loading = false;
+      await _saveAllToLocal();
+      await LocalStore.setLastSyncedAt(DateTime.now());
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[AppProvider] Firestore restore error: $e');
+      loading = false;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Manually push local state up to Firestore.
+  Future<void> manualBackupToCloud() async {
+    if (user == null) return;
+    loading = true;
+    notifyListeners();
+    try {
+      final uid = user!.uid;
+      final accountsRef  = _db.collection('users').doc(uid).collection('accounts');
+      final transRef     = _db.collection('users').doc(uid).collection('transactions');
+      final categoriesRef = _db.collection('users').doc(uid).collection('categories');
+
+      WriteBatch batch = _db.batch();
+      int ops = 0;
+
+      Future<void> flush() async {
+        if (ops > 0) { await batch.commit(); batch = _db.batch(); ops = 0; }
       }
 
-      // Removed default categories seeding
+      for (final a in accounts) {
+        batch.set(accountsRef.doc(a.id), a.toMap());
+        if (++ops >= 450) await flush();
+      }
+      for (final t in transactions) {
+        batch.set(transRef.doc(t.id), t.toMap());
+        if (++ops >= 450) await flush();
+      }
+      for (final c in categories) {
+        batch.set(categoriesRef.doc(c.id), c.toMap());
+        if (++ops >= 450) await flush();
+      }
+      await flush();
 
-      _accountsSub = accountsRef.snapshots().listen((snapshot) {
-        accounts = snapshot.docs.map((doc) => Account.fromMap(doc.id, doc.data())).toList();
-        accounts.sort((a, b) {
-          final cmp = a.position.compareTo(b.position);
-          if (cmp != 0) return cmp;
-          return a.createdAt.compareTo(b.createdAt);
-        });
-        notifyListeners();
-      });
-
-      _transactionsSub = transRef.orderBy('date', descending: true).limit(2000).snapshots().listen((snapshot) {
-        transactions = snapshot.docs.map((doc) => TransactionModel.fromMap(doc.id, doc.data())).toList();
-        notifyListeners();
-      });
-
-      _categoriesSub = categoriesRef.snapshots().listen((snapshot) {
-        categories = snapshot.docs.map((doc) => CategoryModel.fromMap(doc.id, doc.data())).toList();
-        loading = false;
-        notifyListeners();
-      });
-
+      await LocalStore.setLastSyncedAt(DateTime.now());
+      debugPrint('[AppProvider] Local state pushed to Firestore successfully.');
     } catch (e) {
-      debugPrint("Error fetching user data: $e");
+      debugPrint('[AppProvider] manualBackupToCloud error: $e');
+      rethrow;
+    } finally {
       loading = false;
       notifyListeners();
     }
   }
 
+  void _sortAccounts() {
+    accounts.sort((a, b) {
+      final cmp = a.position.compareTo(b.position);
+      return cmp != 0 ? cmp : a.createdAt.compareTo(b.createdAt);
+    });
+  }
+
+  Future<void> _saveAllToLocal() async {
+    await Future.wait([
+      LocalStore.saveAccounts(accounts),
+      LocalStore.saveTransactions(transactions),
+      LocalStore.saveCategories(categories),
+    ]);
+  }
+
+
+
   Future<void> updateAccountsOrder(List<Account> reorderedList) async {
     if (user == null) return;
-    
-    // Proactively/optimistically update local state
+    // Update in-memory immediately.
     accounts = List.from(reorderedList);
-    notifyListeners();
-
-    try {
-      final batch = _db.batch();
-      final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-      for (int i = 0; i < reorderedList.length; i++) {
-        final acc = reorderedList[i];
-        batch.update(accountsRef.doc(acc.id), {'position': i});
-      }
-      await batch.commit();
-    } catch (e) {
-      debugPrint('Failed to update accounts order: $e');
+    for (int i = 0; i < accounts.length; i++) {
+      final a = accounts[i];
+      accounts[i] = Account(id: a.id, name: a.name, balance: a.balance, createdAt: a.createdAt, position: i);
     }
+    notifyListeners();
+    await LocalStore.saveAccounts(accounts);
+  }
+
+  // ── Helper: compute account balance delta in-memory ────────────────────
+  void _applyTransactionToAccounts(TransactionModel tx, {bool reverse = false}) {
+    final sign = reverse ? -1.0 : 1.0;
+    accounts = accounts.map((a) {
+      if (tx.type == 'transfer') {
+        if (a.id == tx.accountId) {
+          return Account(id: a.id, name: a.name, balance: a.balance - sign * tx.amount, createdAt: a.createdAt, position: a.position);
+        }
+        if (a.id == tx.toAccountId) {
+          return Account(id: a.id, name: a.name, balance: a.balance + sign * tx.amount, createdAt: a.createdAt, position: a.position);
+        }
+      } else if (a.id == tx.accountId) {
+        final delta = tx.type == 'income' ? sign * tx.amount : -sign * tx.amount;
+        return Account(id: a.id, name: a.name, balance: a.balance + delta, createdAt: a.createdAt, position: a.position);
+      }
+      return a;
+    }).toList();
   }
 
   Future<void> addTransaction(TransactionModel transaction) async {
     if (user == null) return;
-    final transRef = _db.collection('users').doc(user!.uid).collection('transactions');
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    
-    final batch = _db.batch();
-    final newTransRef = transRef.doc();
-    batch.set(newTransRef, transaction.toMap());
-    
-    if (transaction.type == 'transfer') {
-      batch.update(accountsRef.doc(transaction.accountId), {'balance': FieldValue.increment(-transaction.amount)});
-      if (transaction.toAccountId.isNotEmpty) {
-        batch.update(accountsRef.doc(transaction.toAccountId), {'balance': FieldValue.increment(transaction.amount)});
-      }
-    } else {
-      final change = transaction.type == 'income' ? transaction.amount : -transaction.amount;
-      batch.update(accountsRef.doc(transaction.accountId), {'balance': FieldValue.increment(change)});
-    }
-    
-    await batch.commit();
+    // Generate a local ID (Firestore doc ID format).
+    final localId = _db.collection('_').doc().id;
+    final tx = TransactionModel(
+      id: localId,
+      amount: transaction.amount,
+      type: transaction.type,
+      categoryId: transaction.categoryId,
+      accountId: transaction.accountId,
+      toAccountId: transaction.toAccountId,
+      note: transaction.note,
+      date: transaction.date,
+    );
+    // Update in-memory.
+    transactions = [tx, ...transactions];
+    _applyTransactionToAccounts(tx);
+    notifyListeners();
+    // Persist locally.
+    await _saveAllToLocal();
   }
 
   Future<void> deleteTransaction(TransactionModel transaction) async {
     if (user == null) return;
-    final transRef = _db.collection('users').doc(user!.uid).collection('transactions');
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    
-    final batch = _db.batch();
-    batch.delete(transRef.doc(transaction.id));
-    
-    if (transaction.type == 'transfer') {
-      batch.update(accountsRef.doc(transaction.accountId), {'balance': FieldValue.increment(transaction.amount)});
-      if (transaction.toAccountId.isNotEmpty) {
-        batch.update(accountsRef.doc(transaction.toAccountId), {'balance': FieldValue.increment(-transaction.amount)});
-      }
-    } else {
-      final change = transaction.type == 'income' ? -transaction.amount : transaction.amount;
-      batch.update(accountsRef.doc(transaction.accountId), {'balance': FieldValue.increment(change)});
-    }
-    
-    await batch.commit();
+    // Update in-memory.
+    transactions = transactions.where((t) => t.id != transaction.id).toList();
+    _applyTransactionToAccounts(transaction, reverse: true);
+    notifyListeners();
+    // Persist locally.
+    await _saveAllToLocal();
   }
 
   Future<void> updateTransaction(TransactionModel oldTx, TransactionModel newTx) async {
     if (user == null) return;
-    final transRef = _db.collection('users').doc(user!.uid).collection('transactions');
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    
-    final batch = _db.batch();
-    batch.update(transRef.doc(oldTx.id), newTx.toMap());
-    
-    // Reverse oldTx
-    if (oldTx.type == 'transfer') {
-      batch.update(accountsRef.doc(oldTx.accountId), {'balance': FieldValue.increment(oldTx.amount)});
-      if (oldTx.toAccountId.isNotEmpty) {
-        batch.update(accountsRef.doc(oldTx.toAccountId), {'balance': FieldValue.increment(-oldTx.amount)});
-      }
-    } else {
-      final change = oldTx.type == 'income' ? -oldTx.amount : oldTx.amount;
-      batch.update(accountsRef.doc(oldTx.accountId), {'balance': FieldValue.increment(change)});
-    }
-
-    // Apply newTx
-    if (newTx.type == 'transfer') {
-      batch.update(accountsRef.doc(newTx.accountId), {'balance': FieldValue.increment(-newTx.amount)});
-      if (newTx.toAccountId.isNotEmpty) {
-        batch.update(accountsRef.doc(newTx.toAccountId), {'balance': FieldValue.increment(newTx.amount)});
-      }
-    } else {
-      final change = newTx.type == 'income' ? newTx.amount : -newTx.amount;
-      batch.update(accountsRef.doc(newTx.accountId), {'balance': FieldValue.increment(change)});
-    }
-    
-    await batch.commit();
+    // Reverse old, apply new in-memory.
+    _applyTransactionToAccounts(oldTx, reverse: true);
+    _applyTransactionToAccounts(newTx);
+    transactions = transactions.map((t) => t.id == oldTx.id ? newTx : t).toList();
+    notifyListeners();
+    // Persist locally.
+    await _saveAllToLocal();
   }
-  
+
   Future<void> addAccount(String name, double balance) async {
     if (user == null) return;
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    await accountsRef.add({
-      'name': name,
-      'balance': balance,
-      'createdAt': DateTime.now().millisecondsSinceEpoch,
-      'position': accounts.length,
-    });
+    final id = _db.collection('_').doc().id;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final acc = Account(id: id, name: name, balance: balance, createdAt: now, position: accounts.length);
+    accounts = [...accounts, acc];
+    notifyListeners();
+    await LocalStore.saveAccounts(accounts);
   }
 
   Future<void> updateAccount(String id, String name, double balance) async {
     if (user == null) return;
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    await accountsRef.doc(id).update({'name': name, 'balance': balance});
+    accounts = accounts.map((a) => a.id == id
+        ? Account(id: a.id, name: name, balance: balance, createdAt: a.createdAt, position: a.position)
+        : a).toList();
+    notifyListeners();
+    await LocalStore.saveAccounts(accounts);
   }
 
   Future<void> deleteAccount(String id) async {
     if (user == null) return;
-    final accountsRef = _db.collection('users').doc(user!.uid).collection('accounts');
-    await accountsRef.doc(id).delete();
+    accounts = accounts.where((a) => a.id != id).toList();
+    notifyListeners();
+    await LocalStore.saveAccounts(accounts);
   }
-  
+
   Future<void> addCategory(String name, String icon, String type) async {
     if (user == null) return;
-    final categoriesRef = _db.collection('users').doc(user!.uid).collection('categories');
-    await categoriesRef.add({'name': name, 'icon': icon, 'type': type});
+    final id = _db.collection('_').doc().id;
+    final cat = CategoryModel(id: id, name: name, icon: icon, type: type);
+    categories = [...categories, cat];
+    notifyListeners();
+    await LocalStore.saveCategories(categories);
   }
 
   Future<void> updateCategory(String id, String name, String icon, String type) async {
     if (user == null) return;
-    final categoriesRef = _db.collection('users').doc(user!.uid).collection('categories');
-    await categoriesRef.doc(id).update({'name': name, 'icon': icon, 'type': type});
+    categories = categories.map((c) => c.id == id
+        ? CategoryModel(id: c.id, name: name, icon: icon, type: type)
+        : c).toList();
+    notifyListeners();
+    await LocalStore.saveCategories(categories);
   }
 
   Future<void> deleteCategory(String id) async {
     if (user == null) return;
-    final categoriesRef = _db.collection('users').doc(user!.uid).collection('categories');
-    await categoriesRef.doc(id).delete();
+    categories = categories.where((c) => c.id != id).toList();
+    notifyListeners();
+    await LocalStore.saveCategories(categories);
   }
 
   Future<void> signInWithGoogle() async {
@@ -403,7 +463,7 @@ class AppProvider extends ChangeNotifier {
 
 
 
-  Future<void> exportTransactionsCSV() async {
+  Future<void> exportTransactionsCSV({DateTime? startDate, DateTime? endDate}) async {
     if (user == null) return;
     
     List<List<dynamic>> rows = [];
@@ -411,17 +471,28 @@ class AppProvider extends ChangeNotifier {
     
     final DateFormat formatter = DateFormat('MMM dd, yyyy');
     
+    final filteredTransactions = transactions.where((tx) {
+      if (startDate == null && endDate == null) return true;
+      final date = DateTime.fromMillisecondsSinceEpoch(tx.date);
+      // We set the end date to the end of the selected day to include all transactions on that day
+      final endOfDay = endDate != null ? DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999) : null;
+      if (startDate != null && date.isBefore(startDate)) return false;
+      if (endOfDay != null && date.isAfter(endOfDay)) return false;
+      return true;
+    }).toList();
+
     int count = 0;
-    for (var tx in transactions) {
+    final Map<String, CategoryModel> categoryMap = { for (var c in categories) c.id : c };
+    final Map<String, Account> accountMap = { for (var a in accounts) a.id : a };
+
+    for (var tx in filteredTransactions) {
       if (++count % 50 == 0) await Future.delayed(const Duration(milliseconds: 1));
-      String catName = categories.firstWhere((c) => c.id == tx.categoryId, orElse: () => CategoryModel(id: '', name: 'Unknown', icon: '', type: tx.type)).name;
-      String accName = accounts.firstWhere((a) => a.id == tx.accountId, orElse: () => Account(id: '', name: 'Unknown', balance: 0, createdAt: 0)).name;
+      String catName = (categoryMap[tx.categoryId] ?? CategoryModel(id: '', name: 'Unknown', icon: '', type: tx.type)).name;
+      String accName = (accountMap[tx.accountId] ?? Account(id: '', name: 'Unknown', balance: 0, createdAt: 0)).name;
       
       String toAccName = '';
       if (tx.type == 'transfer' && tx.toAccountId.isNotEmpty) {
-        try {
-          toAccName = accounts.firstWhere((a) => a.id == tx.toAccountId).name;
-        } catch (_) {}
+        toAccName = accountMap[tx.toAccountId]?.name ?? '';
       }
       
       String typeLabel = tx.type == 'income' ? '(+) Income' : (tx.type == 'transfer' ? '(~) Transfer' : '(-) Expense');
@@ -470,24 +541,8 @@ class AppProvider extends ChangeNotifier {
       
       // Read bytes and decode
       final bytes = await file.readAsBytes();
-      String csvString;
-      try {
-        csvString = utf8.decode(bytes);
-      } catch (e) {
-        csvString = latin1.decode(bytes);
-      }
       
-      csvString = CsvParser.cleanCsvString(csvString);
-      final delimiter = CsvParser.detectCsvDelimiter(csvString);
-      
-      final lines = csvString.split(RegExp(r'\r\n|\r|\n'));
-      final List<List<dynamic>> rows = [];
-      int lineCount = 0;
-      for (var line in lines) {
-        if (line.trim().isEmpty) continue;
-        rows.add(CsvParser.parseCsvLine(line, delimiter));
-        if (++lineCount % 50 == 0) await Future.delayed(const Duration(milliseconds: 1));
-      }
+      final rows = await compute(_parseCsvInBackground, bytes);
       
       if (rows.isEmpty) throw Exception("The selected CSV file is empty.");
       
@@ -582,15 +637,7 @@ class AppProvider extends ChangeNotifier {
         categories.clear();
         notifyListeners();
         
-        if (accIdx == -1) {
-           final now = DateTime.now().millisecondsSinceEpoch;
-           final bDoc = await accountsRef.add({'name': 'Bank', 'balance': 0, 'createdAt': now});
-           accounts.add(Account(id: bDoc.id, name: 'Bank', balance: 0, createdAt: now));
-           final cDoc = await accountsRef.add({'name': 'Cash', 'balance': 0, 'createdAt': now});
-           accounts.add(Account(id: cDoc.id, name: 'Cash', balance: 0, createdAt: now));
-           final sDoc = await accountsRef.add({'name': 'Savings', 'balance': 0, 'createdAt': now});
-           accounts.add(Account(id: sDoc.id, name: 'Savings', balance: 0, createdAt: now));
-        }
+
       }
       
       int importedCount = 0;
@@ -697,10 +744,12 @@ class AppProvider extends ChangeNotifier {
         
         String accId;
         if (acc == null) {
-          final doc = await accountsRef.add({'name': accountName, 'balance': 0, 'createdAt': DateTime.now().millisecondsSinceEpoch});
+          final doc = accountsRef.doc();
           accId = doc.id;
           acc = Account(id: accId, name: accountName, balance: 0, createdAt: DateTime.now().millisecondsSinceEpoch);
           accounts.add(acc);
+          currentBatch.set(doc, acc.toMap());
+          operationCount++;
         } else {
           accId = acc.id;
         }
@@ -717,10 +766,12 @@ class AppProvider extends ChangeNotifier {
             }
             
             if (toAcc == null) {
-              final doc = await accountsRef.add({'name': toAccountName, 'balance': 0, 'createdAt': DateTime.now().millisecondsSinceEpoch});
+              final doc = accountsRef.doc();
               toAccId = doc.id;
               toAcc = Account(id: toAccId, name: toAccountName, balance: 0, createdAt: DateTime.now().millisecondsSinceEpoch);
               accounts.add(toAcc);
+              currentBatch.set(doc, toAcc.toMap());
+              operationCount++;
             } else {
               toAccId = toAcc.id;
             }
@@ -738,10 +789,12 @@ class AppProvider extends ChangeNotifier {
         String catId;
         if (cat == null) {
           final icon = _getIconForCategory(categoryName);
-          final doc = await categoriesRef.add({'name': categoryName, 'icon': icon, 'type': type});
+          final doc = categoriesRef.doc();
           catId = doc.id;
           cat = CategoryModel(id: catId, name: categoryName, icon: icon, type: type);
           categories.add(cat);
+          currentBatch.set(doc, cat.toMap());
+          operationCount++;
         } else {
           catId = cat.id;
         }
@@ -808,7 +861,7 @@ class AppProvider extends ChangeNotifier {
       }
       
       if (importedCount == 0) {
-        throw Exception("No valid transactions found in the file. Make sure the file format is correct (Time, Type, Amount, Category, Account, Notes).");
+        throw Exception("Format is incorrect. No valid transactions found in the CSV file. Make sure it contains Time, Type, Amount, Category, Account, and Notes.");
       }
       
       return importedCount;
@@ -848,12 +901,11 @@ class AppProvider extends ChangeNotifier {
       await addToDelBatch((await categoriesRef.get()).docs);
       if (delCount > 0) await delBatch.commit();
 
-      // Seed defaults
-      final now = DateTime.now().millisecondsSinceEpoch;
-      await accountsRef.add({'name': 'Bank', 'balance': 0, 'createdAt': now});
-      await accountsRef.add({'name': 'Cash', 'balance': 0, 'createdAt': now});
-      await accountsRef.add({'name': 'Savings', 'balance': 0, 'createdAt': now});
-      
+      // Clear local storage as well
+      await LocalStore.clearAll();
+      accounts = [];
+      transactions = [];
+      categories = [];
     } catch (e) {
       debugPrint("Error clearing data: $e");
     } finally {
@@ -866,18 +918,14 @@ class AppProvider extends ChangeNotifier {
     try {
       loading = true;
       notifyListeners();
-      
-      // Wait for all local writes to sync with Firestore cloud backend.
-      // Timeout after 5 seconds to prevent freezing the app if the user is completely offline.
-      await _db.waitForPendingWrites().timeout(const Duration(seconds: 5));
-    } catch (e) {
-      debugPrint("Logout warning: Pending writes sync failed or timed out: $e");
     } finally {
       loading = false;
+      // Clear local cache so the next user starts fresh.
+      await LocalStore.clearAll();
       try {
         await GoogleSignIn().signOut();
       } catch (e) {
-        debugPrint("Google Sign-Out Error: $e");
+        debugPrint('Google Sign-Out Error: $e');
       }
       await _auth.signOut();
     }
@@ -909,19 +957,90 @@ class AppProvider extends ChangeNotifier {
     return '📦'; // Default icon
   }
 
+  Future<void> _restorePhotoFromFirestore(String uid) async {
+    try {
+      final doc = await _db.collection('users').doc(uid).get();
+      final data = doc.data();
+      if (data == null || !data.containsKey('photoBase64')) return;
+      final base64Str = data['photoBase64'] as String;
+      final bytes = base64Decode(base64Str);
+      final dir = await getApplicationDocumentsDirectory();
+      final filePath = '${dir.path}/profile_photo_$uid.jpg';
+      await dart_io.File(filePath).writeAsBytes(bytes);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('profile_photo_$uid', filePath);
+      user = AppUser(uid: user!.uid, email: user!.email, photoPath: filePath, name: user!.name);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error restoring photo from Firestore: $e');
+    }
+  }
+
   Future<void> pickProfilePhoto() async {
     if (user == null) return;
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+      final pickedFile = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70, // compress to reduce Firestore payload
+        maxWidth: 512,
+        maxHeight: 512,
+      );
       if (pickedFile != null) {
+        // Copy to permanent app documents directory
+        final dir = await getApplicationDocumentsDirectory();
+        final destPath = '${dir.path}/profile_photo_${user!.uid}.jpg';
+        final destFile = await dart_io.File(pickedFile.path).copy(destPath);
+
+        // Save path locally
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('profile_photo_${user!.uid}', pickedFile.path);
-        user = AppUser(uid: user!.uid, email: user!.email, photoPath: pickedFile.path);
+        await prefs.setString('profile_photo_${user!.uid}', destFile.path);
+
+        // Upload base64-encoded image to Firestore
+        final bytes = await destFile.readAsBytes();
+        final base64Str = base64Encode(bytes);
+        await _db.collection('users').doc(user!.uid).set(
+          {'photoBase64': base64Str},
+          SetOptions(merge: true),
+        );
+
+        user = AppUser(uid: user!.uid, email: user!.email, photoPath: destFile.path, name: user!.name);
         notifyListeners();
       }
     } catch (e) {
-      debugPrint("Error picking profile photo: $e");
+      debugPrint('Error picking profile photo: $e');
     }
   }
+
+  Future<void> updateUserName(String newName) async {
+    if (user == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('profile_name_${user!.uid}', newName);
+      user = AppUser(uid: user!.uid, email: user!.email, photoPath: user!.photoPath, name: newName);
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error updating username: $e");
+    }
+  }
+}
+
+List<List<dynamic>> _parseCsvInBackground(List<int> bytes) {
+  String csvString;
+  try {
+    csvString = utf8.decode(bytes);
+  } catch (e) {
+    csvString = latin1.decode(bytes);
+  }
+  
+  csvString = CsvParser.cleanCsvString(csvString);
+  final delimiter = CsvParser.detectCsvDelimiter(csvString);
+  
+  final lines = csvString.split(RegExp(r'\r\n|\r|\n'));
+  final List<List<dynamic>> rows = [];
+  for (var line in lines) {
+    if (line.trim().isEmpty) continue;
+    rows.add(CsvParser.parseCsvLine(line, delimiter));
+  }
+  return rows;
 }

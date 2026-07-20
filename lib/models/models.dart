@@ -2,8 +2,9 @@ class AppUser {
   final String uid;
   final String email;
   final String? photoPath;
+  final String? name;
 
-  AppUser({required this.uid, required this.email, this.photoPath});
+  AppUser({required this.uid, required this.email, this.photoPath, this.name});
 }
 
 class Account {
