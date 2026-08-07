@@ -8,7 +8,7 @@ A sleek, dark-themed personal finance app built with **Flutter** and powered by 
 
 | 📊 Dashboard | 📈 Analytics |
 | :---: | :---: |
-| <img src="assets/dashboard_screenshot.png" width="360" alt="Dashboard Screen"/> | <img src="assets/analytics_screenshot.png" width="360" alt="Analytics Screen"/> |
+| <img src="assets/dashboard_screenshot.jpg" width="360" alt="Dashboard Screen"/> | <img src="assets/analytics_screenshot.jpg" width="360" alt="Analytics Screen"/> |
 
 ---
 
