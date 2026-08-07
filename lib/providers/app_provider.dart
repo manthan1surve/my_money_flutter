@@ -12,6 +12,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/models.dart';
 import '../core/csv_parser.dart';
 import '../services/local_store.dart';
@@ -30,6 +31,10 @@ class AppProvider extends ChangeNotifier {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // Auto-sync state
+  bool _syncPending = false;
+  Timer? _syncDebounce;
+
   AppProvider() {
     _init();
   }
@@ -41,6 +46,17 @@ class AppProvider extends ChangeNotifier {
 
     await _loadCurrency();
     await _loadOnboardingStatus();
+
+    // Listen to network status changes to automatically trigger pending syncs
+    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) async {
+      if (results.any((r) => r != ConnectivityResult.none)) {
+        final pending = await LocalStore.getPendingSync();
+        if (pending && user != null) {
+          debugPrint('[AppProvider] Internet restored — triggering automatic pending sync.');
+          _scheduleSyncToCloud();
+        }
+      }
+    });
 
 
     _auth.authStateChanges().listen((User? firebaseUser) async {
@@ -152,10 +168,16 @@ class AppProvider extends ChangeNotifier {
   Future<void> _fetchUserData() async {
     if (user == null) return;
 
-    // 1. Load local cache immediately — UI renders with no network wait.
-    final localAccounts = await LocalStore.loadAccounts();
-    final localTransactions = await LocalStore.loadTransactions();
-    final localCategories = await LocalStore.loadCategories();
+    // 1. Load local cache immediately in parallel — UI renders with no network wait.
+    final results = await Future.wait([
+      LocalStore.loadAccounts(),
+      LocalStore.loadTransactions(),
+      LocalStore.loadCategories(),
+    ]);
+    final localAccounts = results[0] as List<Account>;
+    final localTransactions = results[1] as List<TransactionModel>;
+    final localCategories = results[2] as List<CategoryModel>;
+    
     final hasCachedData = localAccounts.isNotEmpty ||
         localTransactions.isNotEmpty ||
         localCategories.isNotEmpty;
@@ -172,7 +194,7 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
       // If there is no local data (e.g., fresh login or install), automatically attempt to restore from cloud.
       try {
-        await manualRestoreFromCloud();
+        await _restoreFromCloud();
       } catch (e) {
         debugPrint('Auto-restore failed: $e');
         // If it fails (e.g. offline), we stop loading so UI isn't stuck.
@@ -182,8 +204,8 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Manually pull data from Firestore, overriding local cache.
-  Future<void> manualRestoreFromCloud() async {
+  /// Pull data from Firestore to populate local state/cache on fresh startup or login.
+  Future<void> _restoreFromCloud() async {
     if (user == null) return;
     loading = true;
     notifyListeners();
@@ -231,15 +253,37 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Manually push local state up to Firestore.
-  Future<void> manualBackupToCloud() async {
+  /// Schedules an automatic background sync to Firestore.
+  /// Debounced so rapid mutations are batched into a single upload.
+  void _scheduleSyncToCloud() {
     if (user == null) return;
-    loading = true;
-    notifyListeners();
+    _syncPending = true;
+    LocalStore.setPendingSync(true);
+    _syncDebounce?.cancel();
+    _syncDebounce = Timer(const Duration(seconds: 2), () async {
+      if (!_syncPending || user == null) return;
+      // Check network before attempting sync.
+      try {
+        final result = await Connectivity().checkConnectivity();
+        if (result.contains(ConnectivityResult.none)) {
+          debugPrint('[AppProvider] Offline — sync deferred.');
+          return;
+        }
+      } catch (_) {
+        return;
+      }
+      await _pushToFirestore();
+    });
+  }
+
+  /// Pushes current in-memory state to Firestore silently (no loading indicator).
+  Future<void> _pushToFirestore() async {
+    if (user == null) return;
+    _syncPending = false;
     try {
       final uid = user!.uid;
-      final accountsRef  = _db.collection('users').doc(uid).collection('accounts');
-      final transRef     = _db.collection('users').doc(uid).collection('transactions');
+      final accountsRef   = _db.collection('users').doc(uid).collection('accounts');
+      final transRef      = _db.collection('users').doc(uid).collection('transactions');
       final categoriesRef = _db.collection('users').doc(uid).collection('categories');
 
       WriteBatch batch = _db.batch();
@@ -262,15 +306,11 @@ class AppProvider extends ChangeNotifier {
         if (++ops >= 450) await flush();
       }
       await flush();
-
       await LocalStore.setLastSyncedAt(DateTime.now());
-      debugPrint('[AppProvider] Local state pushed to Firestore successfully.');
+      await LocalStore.setPendingSync(false);
+      debugPrint('[AppProvider] Auto-sync to Firestore successful.');
     } catch (e) {
-      debugPrint('[AppProvider] manualBackupToCloud error: $e');
-      rethrow;
-    } finally {
-      loading = false;
-      notifyListeners();
+      debugPrint('[AppProvider] Auto-sync error: $e');
     }
   }
 
@@ -340,8 +380,9 @@ class AppProvider extends ChangeNotifier {
     transactions = [tx, ...transactions];
     _applyTransactionToAccounts(tx);
     notifyListeners();
-    // Persist locally.
+    // Persist locally, then sync to cloud.
     await _saveAllToLocal();
+    _scheduleSyncToCloud();
   }
 
   Future<void> deleteTransaction(TransactionModel transaction) async {
@@ -350,8 +391,9 @@ class AppProvider extends ChangeNotifier {
     transactions = transactions.where((t) => t.id != transaction.id).toList();
     _applyTransactionToAccounts(transaction, reverse: true);
     notifyListeners();
-    // Persist locally.
+    // Persist locally, then sync to cloud.
     await _saveAllToLocal();
+    _scheduleSyncToCloud();
   }
 
   Future<void> updateTransaction(TransactionModel oldTx, TransactionModel newTx) async {
@@ -361,8 +403,9 @@ class AppProvider extends ChangeNotifier {
     _applyTransactionToAccounts(newTx);
     transactions = transactions.map((t) => t.id == oldTx.id ? newTx : t).toList();
     notifyListeners();
-    // Persist locally.
+    // Persist locally, then sync to cloud.
     await _saveAllToLocal();
+    _scheduleSyncToCloud();
   }
 
   Future<void> addAccount(String name, double balance) async {
@@ -373,6 +416,7 @@ class AppProvider extends ChangeNotifier {
     accounts = [...accounts, acc];
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _scheduleSyncToCloud();
   }
 
   Future<void> updateAccount(String id, String name, double balance) async {
@@ -382,6 +426,7 @@ class AppProvider extends ChangeNotifier {
         : a).toList();
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _scheduleSyncToCloud();
   }
 
   Future<void> deleteAccount(String id) async {
@@ -389,6 +434,7 @@ class AppProvider extends ChangeNotifier {
     accounts = accounts.where((a) => a.id != id).toList();
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _scheduleSyncToCloud();
   }
 
   Future<void> addCategory(String name, String icon, String type) async {
@@ -398,6 +444,7 @@ class AppProvider extends ChangeNotifier {
     categories = [...categories, cat];
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    _scheduleSyncToCloud();
   }
 
   Future<void> updateCategory(String id, String name, String icon, String type) async {
@@ -407,6 +454,7 @@ class AppProvider extends ChangeNotifier {
         : c).toList();
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    _scheduleSyncToCloud();
   }
 
   Future<void> deleteCategory(String id) async {
@@ -414,6 +462,7 @@ class AppProvider extends ChangeNotifier {
     categories = categories.where((c) => c.id != id).toList();
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    _scheduleSyncToCloud();
   }
 
   Future<void> signInWithGoogle() async {
@@ -918,6 +967,17 @@ class AppProvider extends ChangeNotifier {
     try {
       loading = true;
       notifyListeners();
+      // Cancel any pending debounce and force an immediate sync before logging out.
+      _syncDebounce?.cancel();
+      _syncDebounce = null;
+      if (user != null) {
+        try {
+          await _pushToFirestore();
+          debugPrint('[AppProvider] Pre-logout sync completed.');
+        } catch (e) {
+          debugPrint('[AppProvider] Pre-logout sync failed (continuing logout): $e');
+        }
+      }
     } finally {
       loading = false;
       // Clear local cache so the next user starts fresh.

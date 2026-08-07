@@ -57,7 +57,18 @@ class ConcentricRingsPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant ConcentricRingsPainter oldDelegate) => true;
+  bool shouldRepaint(covariant ConcentricRingsPainter oldDelegate) {
+    if (rings.length != oldDelegate.rings.length) return true;
+    for (int i = 0; i < rings.length; i++) {
+      if (rings[i]['id'] != oldDelegate.rings[i]['id'] ||
+          rings[i]['amount'] != oldDelegate.rings[i]['amount'] ||
+          rings[i]['percentage'] != oldDelegate.rings[i]['percentage'] ||
+          rings[i]['color'] != oldDelegate.rings[i]['color']) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 class CustomLineChart extends StatefulWidget {
@@ -69,6 +80,7 @@ class CustomLineChart extends StatefulWidget {
   final bool isExpense;
   final int? defaultIndex;
   final ValueChanged<Map<String, dynamic>>? onActiveItemChanged;
+  final double labelWidth;
 
   const CustomLineChart({
     super.key,
@@ -80,6 +92,7 @@ class CustomLineChart extends StatefulWidget {
     required this.isExpense,
     this.defaultIndex,
     this.onActiveItemChanged,
+    this.labelWidth = 30,
   });
 
   @override
@@ -216,46 +229,59 @@ class _CustomLineChartState extends State<CustomLineChart> {
                     ),
 
                     // Floating date & amount label above active point
-                    Positioned(
-                      left: (activePt.dx - 45).clamp(4.0, size.width - 90),
-                      top: (activePt.dy - 54).clamp(68.0, size.height - 40),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: BackdropFilter(
-                            filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              curve: Curves.easeOutCubic,
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    activeData['label'],
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '${widget.currencySymbol}${activeData['total'].round()}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                  ),
-                                ],
+                    (() {
+                      const tooltipW = 60.0;
+                      final fraction = size.width > 0
+                          ? (activePt.dx / size.width).clamp(0.0, 1.0)
+                          : 0.5;
+                      final tooltipLeft = (activePt.dx - fraction * tooltipW)
+                          .clamp(0.0, size.width - tooltipW);
+                      final tooltipTop = (activePt.dy - 54)
+                          .clamp(4.0, size.height - 60);
+                      return Positioned(
+                        left: tooltipLeft,
+                        top: tooltipTop,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: BackdropFilter(
+                              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOutCubic,
+                                width: tooltipW,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      activeData['label'],
+                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${widget.currencySymbol}${activeData['total'].round()}',
+                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      );
+                    })(),
                   ],
                 );
               },
@@ -294,13 +320,14 @@ class _CustomLineChartState extends State<CustomLineChart> {
 
                         final double leftPct = widget.data.length > 1 ? (i / (widget.data.length - 1)) : 0.5;
                         final double leftPos = leftPct * constraints.maxWidth;
+                        final double half = widget.labelWidth / 2;
 
                         return Positioned(
-                          left: leftPos - 15,
-                          width: 30,
+                          left: leftPos - half,
+                          width: widget.labelWidth,
                           child: Text(
                             displayText,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
                             textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.visible,

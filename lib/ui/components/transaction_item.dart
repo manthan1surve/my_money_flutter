@@ -24,6 +24,7 @@ class TransactionItem extends StatelessWidget {
       account = provider.accounts.firstWhere((a) => a.id == transaction.accountId);
     } catch (_) {}
     
+    final outerContext = context;
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
@@ -33,7 +34,7 @@ class TransactionItem extends StatelessWidget {
         reverseTransitionDuration: const Duration(milliseconds: 300),
         pageBuilder: (context, animation, secondaryAnimation) => TransactionDetailsDialog(
           transaction: transaction,
-          parentContext: context,
+          parentContext: outerContext,
           category: category,
           account: account,
         ),

@@ -1,6 +1,14 @@
-﻿# 💰 My Money — Personal Finance Tracker
+# 💰 My Money — Personal Finance Tracker
 
 A sleek, dark-themed personal finance app built with **Flutter** and powered by **Firebase**. Track expenses, incomes, and transfers across multiple accounts with beautiful analytics and full offline support.
+
+---
+
+## 📱 App Screenshots
+
+| 📊 Dashboard | 📈 Analytics |
+| :---: | :---: |
+| <img src="assets/dashboard_screenshot.png" width="360" alt="Dashboard Screen"/> | <img src="assets/analytics_screenshot.png" width="360" alt="Analytics Screen"/> |
 
 ---
 

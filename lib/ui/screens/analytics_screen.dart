@@ -62,6 +62,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   String? _cachedAnalysisType;
   String? _cachedTrendPeriod;
 
+  // Cached average data
+  List<TransactionModel>? _cachedAvgTransactions;
+  DateTime? _cachedAvgDate;
+  String? _cachedAvgPeriod;
+  double _avgIncome = 0;
+  double _avgExpense = 0;
+
   List<TransactionModel> _monthlyTransactions = [];
   double _mExpense = 0;
   double _mIncome = 0;
@@ -124,7 +131,45 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _trendGraph = [];
     _maxTrendAmount = 0;
 
-    if (_trendPeriod == '1m') {
+    if (_trendPeriod == '1w') {
+      final DateTime targetEndDate;
+      final now = DateTime.now();
+      if (currentDate.month == now.month && currentDate.year == now.year) {
+        targetEndDate = DateTime(now.year, now.month, now.day);
+      } else {
+        targetEndDate = DateTime(currentDate.year, currentDate.month + 1, 0);
+      }
+
+      final monthStart = DateTime(targetEndDate.year, targetEndDate.month, 1);
+
+      final List<DateTime> days = [];
+      for (int i = 6; i >= 0; i--) {
+        final day = targetEndDate.subtract(Duration(days: i));
+        // Only include days within the current month
+        if (!day.isBefore(monthStart)) {
+          days.add(day);
+        }
+      }
+
+      Map<String, double> dailyTotals = {};
+      for (var t in transactions) {
+        if (t.type == _analysisType) {
+          final tDate = DateTime.fromMillisecondsSinceEpoch(t.date);
+          final key = "${tDate.year}-${tDate.month.toString().padLeft(2, '0')}-${tDate.day.toString().padLeft(2, '0')}";
+          dailyTotals[key] = (dailyTotals[key] ?? 0.0) + t.amount;
+        }
+      }
+
+      for (var day in days) {
+        final key = "${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}";
+        final tTotal = dailyTotals[key] ?? 0.0;
+        if (tTotal > _maxTrendAmount) _maxTrendAmount = tTotal;
+        _trendGraph.add({
+          'label': DateFormat('dd').format(day),
+          'total': tTotal,
+        });
+      }
+    } else if (_trendPeriod == '1m') {
       final year = currentDate.year;
       final month = currentDate.month;
       final daysInMonth = DateTime(year, month + 1, 0).day;
@@ -190,24 +235,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     }
 
     _trendDefaultIndex = null;
-    if (_trendPeriod == '1m' && _trendGraph.isNotEmpty) {
-      final now = DateTime.now();
-      if (currentDate.month == now.month && currentDate.year == now.year) {
-        int presentIndex = now.day - 1;
-        if (presentIndex >= _trendGraph.length) {
-          presentIndex = _trendGraph.length - 1;
-        }
-        _trendDefaultIndex = presentIndex;
+    if ((_trendPeriod == '1m' || _trendPeriod == '1w') && _trendGraph.isNotEmpty) {
+      if (_trendPeriod == '1w') {
+        _trendDefaultIndex = _trendGraph.length - 1;
       } else {
-        double maxVal = -1;
-        int maxIdx = 0;
-        for (int i = 0; i < _trendGraph.length; i++) {
-          if (_trendGraph[i]['total'] > maxVal) {
-            maxVal = _trendGraph[i]['total'];
-            maxIdx = i;
+        final now = DateTime.now();
+        if (currentDate.month == now.month && currentDate.year == now.year) {
+          int presentIndex = now.day - 1;
+          if (presentIndex >= _trendGraph.length) {
+            presentIndex = _trendGraph.length - 1;
           }
+          _trendDefaultIndex = presentIndex;
+        } else {
+          double maxVal = -1;
+          int maxIdx = 0;
+          for (int i = 0; i < _trendGraph.length; i++) {
+            if (_trendGraph[i]['total'] > maxVal) {
+              maxVal = _trendGraph[i]['total'];
+              maxIdx = i;
+            }
+          }
+          _trendDefaultIndex = maxIdx;
         }
-        _trendDefaultIndex = maxIdx;
       }
     }
 
@@ -247,6 +296,49 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
       _groupedBarData.add({'label': mName, 'income': inc, 'expense': exp});
     }
+  }
+
+  void _calculateAverages(List<TransactionModel> transactions, DateTime currentDate) {
+    if (_cachedAvgTransactions == transactions &&
+        _cachedAvgDate == currentDate &&
+        _cachedAvgPeriod == _avgPeriod) {
+      return;
+    }
+
+    _cachedAvgTransactions = transactions;
+    _cachedAvgDate = currentDate;
+    _cachedAvgPeriod = _avgPeriod;
+
+    List<TransactionModel> periodTrans = [];
+    if (_avgPeriod == 'month') {
+      periodTrans = _monthlyTransactions;
+    } else if (_avgPeriod == '6_months') {
+      final cutoff = DateTime(currentDate.year, currentDate.month - 5, 1);
+      periodTrans = transactions.where((t) {
+        final d = DateTime.fromMillisecondsSinceEpoch(t.date);
+        return d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff);
+      }).toList();
+    } else if (_avgPeriod == '1_year') {
+      final cutoff = DateTime(currentDate.year - 1, currentDate.month, 1);
+      periodTrans = transactions.where((t) {
+        final d = DateTime.fromMillisecondsSinceEpoch(t.date);
+        return d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff);
+      }).toList();
+    } else {
+      periodTrans = transactions;
+    }
+
+    final activeDaySet = periodTrans.map((t) {
+      final d = DateTime.fromMillisecondsSinceEpoch(t.date);
+      return "${d.year}-${d.month}-${d.day}";
+    }).toSet();
+    final activeDays = activeDaySet.length;
+
+    final pIncome = periodTrans.where((t) => t.type == 'income').fold(0.0, (acc, curr) => acc + curr.amount);
+    final pExpense = periodTrans.where((t) => t.type == 'expense').fold(0.0, (acc, curr) => acc + curr.amount);
+
+    _avgIncome = activeDays > 0 ? pIncome / activeDays : 0.0;
+    _avgExpense = activeDays > 0 ? pExpense / activeDays : 0.0;
   }
 
   void _showCategoryTransactions(String categoryId, String categoryName, Color categoryColor) {
@@ -458,6 +550,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final categories = context.select((AppProvider p) => p.categories);
 
     _calculateAnalyticsData(transactions, currentDate, categories);
+    _calculateAverages(transactions, currentDate);
 
     final monthlyBalance = _mIncome - _mExpense;
 
@@ -509,40 +602,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       borderRadius: 28,
                       height: 252,
                       child: Builder(builder: (context) {
-                        List<TransactionModel> periodTrans = [];
-                        
-                        if (_avgPeriod == 'month') {
-                          periodTrans = _monthlyTransactions;
-                        } else if (_avgPeriod == '6_months') {
-                          final cutoff = DateTime(currentDate.year, currentDate.month - 5, 1);
-                          periodTrans = transactions.where((t) {
-                            final d = DateTime.fromMillisecondsSinceEpoch(t.date);
-                            return d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff);
-                          }).toList();
-                        } else if (_avgPeriod == '1_year') {
-                          final cutoff = DateTime(currentDate.year - 1, currentDate.month, 1);
-                          periodTrans = transactions.where((t) {
-                            final d = DateTime.fromMillisecondsSinceEpoch(t.date);
-                            return d.isAfter(cutoff) || d.isAtSameMomentAs(cutoff);
-                          }).toList();
-                        } else {
-                          periodTrans = transactions;
-                        }
-
-                        final activeDaySet = periodTrans
-                            .map((t) {
-                               final d = DateTime.fromMillisecondsSinceEpoch(t.date);
-                               return "${d.year}-${d.month}-${d.day}";
-                            })
-                            .toSet();
-                        final activeDays = activeDaySet.length;
-                        
-                        final pIncome = periodTrans.where((t) => t.type == 'income').fold(0.0, (acc, curr) => acc + curr.amount);
-                        final pExpense = periodTrans.where((t) => t.type == 'expense').fold(0.0, (acc, curr) => acc + curr.amount);
-                        
-                        final avgIncome  = activeDays > 0 ? pIncome / activeDays : 0.0;
-                        final avgExpense = activeDays > 0 ? pExpense / activeDays : 0.0;
-
                         final options = ['1M', '6M', '1Y', 'All'];
                         final values = ['month', '6_months', '1_year', 'all_time'];
 
@@ -565,7 +624,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                       fit: BoxFit.scaleDown,
                                       alignment: Alignment.center,
                                       child: Text(
-                                        "${currency.symbol}${avgIncome.formatIndianCurrency()}",
+                                        "${currency.symbol}${_avgIncome.formatIndianCurrency()}",
                                         style: GoogleFonts.castoro(color: const Color(0xFF00FE06), fontSize: 22, fontWeight: FontWeight.bold),
                                       ),
                                     ),
@@ -578,7 +637,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                       fit: BoxFit.scaleDown,
                                       alignment: Alignment.center,
                                       child: Text(
-                                        "${currency.symbol}${avgExpense.formatIndianCurrency()}",
+                                        "${currency.symbol}${_avgExpense.formatIndianCurrency()}",
                                         style: GoogleFonts.castoro(color: const Color(0xFFFE0000), fontSize: 22, fontWeight: FontWeight.bold),
                                       ),
                                     ),
@@ -679,29 +738,29 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           GestureDetector(
                             onTap: _toggleAnalysisType,
                             child: Container(
-                              width: 60,
-                              height: 30,
-                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(15)),
+                              width: 50,
+                              height: 24,
+                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
                               child: Stack(
                                 children: [
                                   AnimatedContainer(
                                     duration: const Duration(milliseconds: 400),
                                     decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(15),
+                                      borderRadius: BorderRadius.circular(12),
                                       color: _analysisType == 'expense' ? const Color(0xFFFE0000) : const Color(0xFF00FE06),
                                     ),
                                   ),
                                   AnimatedPositioned(
                                     duration: const Duration(milliseconds: 400),
                                     curve: Curves.easeInOut,
-                                    left: _analysisType == 'expense' ? 2.0 : 32.0,
+                                    left: _analysisType == 'expense' ? 2.0 : 26.0,
                                     top: 2,
                                     child: Container(
-                                      width: 26,
-                                      height: 26,
+                                      width: 20,
+                                      height: 20,
                                       decoration: BoxDecoration(
                                         color: Colors.white,
-                                        borderRadius: BorderRadius.circular(13),
+                                        borderRadius: BorderRadius.circular(10),
                                         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 2, offset: Offset(0, 1))],
                                       ),
                                       alignment: Alignment.center,
@@ -710,7 +769,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                         child: Icon(
                                           _analysisType == 'expense' ? Icons.arrow_downward : Icons.arrow_upward,
                                           key: ValueKey(_analysisType),
-                                          size: 11,
+                                          size: 9,
                                           color: _analysisType == 'expense' ? const Color(0xFFFE0000) : const Color(0xFF00FE06),
                                         ),
                                       ),
@@ -905,64 +964,59 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              const Text("Trend", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                              Container(
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1A1A1A),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-                                ),
-                                padding: const EdgeInsets.all(2),
-                                child: Stack(
-                                  children: [
-                                    AnimatedPositioned(
-                                      duration: const Duration(milliseconds: 400),
-                                      curve: Curves.easeOutQuart,
-                                      left: _trendPeriod == '1m' ? 0.0 : (_trendPeriod == '6m' ? 50.0 : (_trendPeriod == '1y' ? 100.0 : 150.0)),
-                                      top: 0,
-                                      bottom: 0,
-                                      child: Container(
-                                        width: 50,
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(17),
-                                        ),
-                                      ),
-                                    ),
-                                    Row(
-                                      children: [
-                                        _buildTrendBtn('1m', '1M'),
-                                        _buildTrendBtn('6m', '6M'),
-                                        _buildTrendBtn('1y', '1Y'),
-                                        _buildTrendBtn('all', 'ALL'),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 36),
-                          ValueListenableBuilder<Map<String, dynamic>?>(
-                            valueListenable: _activeTrendNotifier,
-                            builder: (context, activeData, _) {
-                              if (activeData == null) return const SizedBox();
+                          const Text("Trend", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 12),
+                          Builder(
+                            builder: (context) {
+                              final periodTotal = _trendGraph.fold<double>(
+                                0.0,
+                                (sum, item) => sum + (item['total'] as double),
+                              );
+                              final periodLabel = _trendPeriod == '1w'
+                                  ? 'This Week'
+                                  : _trendPeriod == '1m'
+                                      ? 'This Month'
+                                      : _trendPeriod == '6m'
+                                          ? 'Last 6 Months'
+                                          : _trendPeriod == '1y'
+                                              ? 'This Year'
+                                              : 'All Time';
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    _analysisType == 'expense' ? 'Total Expense' : 'Money Received',
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12, letterSpacing: 0.3),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        _analysisType == 'expense' ? 'Total Expense' : 'Total Income',
+                                        style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12, letterSpacing: 0.3),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.08),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          periodLabel,
+                                          style: TextStyle(
+                                            color: Colors.white.withValues(alpha: 0.45),
+                                            fontSize: 10,
+                                            letterSpacing: 0.2,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    '${currency.symbol}${activeData['total'].round()}',
-                                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                                    '${currency.symbol}${periodTotal.formatIndianCurrency()}',
+                                    style: TextStyle(
+                                      color: _analysisType == 'expense' ? const Color(0xFFFE0000) : const Color(0xFF00FE06),
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
                                   ),
                                 ],
                               );
@@ -970,7 +1024,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 10),
                       SizedBox(
                         height: 220,
                         child: _isCalculatingTrend
@@ -984,7 +1038,54 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                 isExpense: _analysisType == 'expense',
                                 defaultIndex: _trendDefaultIndex,
                                 onActiveItemChanged: (item) => _activeTrendNotifier.value = item,
+                                labelWidth: _trendPeriod == '1w' ? 50 : 30,
                               ),
+                      ),
+                      const SizedBox(height: 20),
+                      Center(
+                        child: Container(
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A1A1A),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white),
+                          ),
+                          padding: const EdgeInsets.all(2),
+                          child: Stack(
+                            children: [
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 400),
+                                curve: Curves.easeOutQuart,
+                                left: _trendPeriod == '1w'
+                                    ? 0.0
+                                    : (_trendPeriod == '1m'
+                                        ? 45.0
+                                        : (_trendPeriod == '6m'
+                                            ? 90.0
+                                            : (_trendPeriod == '1y' ? 135.0 : 180.0))),
+                                top: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 45,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(17),
+                                  ),
+                                ),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildTrendBtn('1w', '1W'),
+                                  _buildTrendBtn('1m', '1M'),
+                                  _buildTrendBtn('6m', '6M'),
+                                  _buildTrendBtn('1y', '1Y'),
+                                  _buildTrendBtn('all', 'ALL'),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -1052,8 +1153,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       onTap: () => _setTrendPeriod(period),
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 50,
-        height: 34,
+        width: 45,
+        height: 36,
         alignment: Alignment.center,
         child: AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 400),
