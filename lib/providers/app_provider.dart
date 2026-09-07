@@ -33,7 +33,12 @@ class AppProvider extends ChangeNotifier {
 
   // Auto-sync state
   bool _syncPending = false;
+  bool get isSynced => !_syncPending;
   Timer? _syncDebounce;
+  List<Map<String, dynamic>> _pendingDeltas = [];
+
+  StreamSubscription? _connectivitySub;
+  StreamSubscription? _authSub;
 
   AppProvider() {
     _init();
@@ -44,22 +49,27 @@ class AppProvider extends ChangeNotifier {
     // Disable Firestore SDK disk cache — LocalStore owns all persistence.
     _db.settings = const Settings(persistenceEnabled: false);
 
+    _syncPending = await LocalStore.getPendingSync();
+    _pendingDeltas = await LocalStore.loadPendingDeltas();
+    if (_pendingDeltas.isNotEmpty) {
+      _syncPending = true;
+    }
     await _loadCurrency();
     await _loadOnboardingStatus();
 
     // Listen to network status changes to automatically trigger pending syncs
-    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) async {
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) async {
       if (results.any((r) => r != ConnectivityResult.none)) {
         final pending = await LocalStore.getPendingSync();
-        if (pending && user != null) {
-          debugPrint('[AppProvider] Internet restored — triggering automatic pending sync.');
+        if ((pending || _pendingDeltas.isNotEmpty) && user != null) {
+          debugPrint('[AppProvider] Internet restored — triggering automatic pending delta sync.');
           _scheduleSyncToCloud();
         }
       }
     });
 
 
-    _auth.authStateChanges().listen((User? firebaseUser) async {
+    _authSub = _auth.authStateChanges().listen((User? firebaseUser) async {
       if (firebaseUser != null) {
         final prefs = await SharedPreferences.getInstance();
         final rawPhotoPath = prefs.getString('profile_photo_${firebaseUser.uid}');
@@ -81,12 +91,21 @@ class AppProvider extends ChangeNotifier {
         accounts = [];
         transactions = [];
         categories = [];
+        _pendingDeltas = [];
         loading = false;
         notifyListeners();
       }
     });
   }
 
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    _authSub?.cancel();
+    _syncDebounce?.cancel();
+    super.dispose();
+  }
 
   Future<void> _loadOnboardingStatus() async {
     try {
@@ -216,7 +235,7 @@ class AppProvider extends ChangeNotifier {
       final categoriesRef = _db.collection('users').doc(uid).collection('categories');
 
       // Pull user currency preference.
-      final userDoc = await _db.collection('users').doc(uid).get();
+      final userDoc = await _db.collection('users').doc(uid).get().timeout(const Duration(seconds: 15));
       if (userDoc.exists && userDoc.data() != null && userDoc.data()!.containsKey('currency')) {
         final decoded = CurrencyModel.fromMap(userDoc.data()!['currency']);
         const fixedSymbols = {
@@ -228,11 +247,11 @@ class AppProvider extends ChangeNotifier {
         await prefs.setString('user_currency', json.encode(currency.toMap()));
       }
 
-      final accountsSnap = await accountsRef.get();
+      final accountsSnap = await accountsRef.get().timeout(const Duration(seconds: 15));
       final results = await Future.wait([
         transRef.orderBy('date', descending: true).limit(2000).get(),
         categoriesRef.get(),
-      ]);
+      ]).timeout(const Duration(seconds: 15));
       final transSnap = results[0];
       final catSnap   = results[1];
 
@@ -253,33 +272,150 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  /// Schedules an automatic background sync to Firestore.
+  /// Explicitly syncs local state with Firestore online.
+  Future<void> syncOnline() async {
+    if (user == null) return;
+    try {
+      final result = await Connectivity().checkConnectivity();
+      if (result.contains(ConnectivityResult.none)) {
+        throw Exception('No internet connection available.');
+      }
+    } catch (e) {
+      if (e.toString().contains('internet connection')) rethrow;
+    }
+
+    _syncPending = true;
+    notifyListeners();
+    try {
+      if (_pendingDeltas.isNotEmpty) {
+        await _flushDeltasToFirestore();
+      } else {
+        await _pushToFirestore();
+      }
+      if (_syncPending) {
+        throw Exception('Cloud sync could not be completed.');
+      }
+    } catch (e) {
+      _syncPending = true;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  void _enqueueDelta(String collection, String id, String op, Map<String, dynamic>? data) {
+    _pendingDeltas.removeWhere((d) => d['collection'] == collection && d['id'] == id);
+    _pendingDeltas.add({
+      'collection': collection,
+      'id': id,
+      'op': op,
+      'data': ?data,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+    _syncPending = true;
+    LocalStore.setPendingSync(true);
+    LocalStore.savePendingDeltas(_pendingDeltas);
+  }
+
+  /// Schedules an automatic background sync of pending deltas to Firestore.
   /// Debounced so rapid mutations are batched into a single upload.
   void _scheduleSyncToCloud() {
     if (user == null) return;
-    _syncPending = true;
-    LocalStore.setPendingSync(true);
     _syncDebounce?.cancel();
-    _syncDebounce = Timer(const Duration(seconds: 2), () async {
-      if (!_syncPending || user == null) return;
-      // Check network before attempting sync.
+    _syncDebounce = Timer(const Duration(milliseconds: 600), () async {
+      if (user == null) return;
       try {
         final result = await Connectivity().checkConnectivity();
         if (result.contains(ConnectivityResult.none)) {
-          debugPrint('[AppProvider] Offline — sync deferred.');
+          debugPrint('[AppProvider] Offline — delta sync deferred, marking sync pending.');
+          _syncPending = true;
+          await LocalStore.setPendingSync(true);
+          notifyListeners();
           return;
         }
-      } catch (_) {
-        return;
+        try {
+          if (_pendingDeltas.isNotEmpty) {
+            await _flushDeltasToFirestore();
+          } else if (_syncPending) {
+            await _pushToFirestore();
+          }
+        } catch (e) {
+          debugPrint('[AppProvider] Background delta sync failed: $e');
+          _syncPending = true;
+          await LocalStore.setPendingSync(true);
+          notifyListeners();
+        }
+      } catch (e) {
+        if (e.toString().contains('internet connection')) {
+          _syncPending = true;
+          await LocalStore.setPendingSync(true);
+          notifyListeners();
+        }
       }
-      await _pushToFirestore();
     });
   }
 
-  /// Pushes current in-memory state to Firestore silently (no loading indicator).
+  /// Flushes queued delta mutations (document sets & deletes) to Firestore in a minimal batch.
+  Future<void> _flushDeltasToFirestore() async {
+    if (user == null) return;
+    if (_pendingDeltas.isEmpty) {
+      _syncPending = false;
+      await LocalStore.setPendingSync(false);
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final uid = user!.uid;
+      final deltasToFlush = List<Map<String, dynamic>>.from(_pendingDeltas);
+      WriteBatch batch = _db.batch();
+      int ops = 0;
+
+      Future<void> flushBatch() async {
+        if (ops > 0) {
+          await batch.commit();
+          batch = _db.batch();
+          ops = 0;
+        }
+      }
+
+      for (final delta in deltasToFlush) {
+        final col = delta['collection'] as String;
+        final docId = delta['id'] as String;
+        final op = delta['op'] as String;
+        final docRef = _db.collection('users').doc(uid).collection(col).doc(docId);
+
+        if (op == 'delete') {
+          batch.delete(docRef);
+        } else {
+          final data = Map<String, dynamic>.from(delta['data'] as Map);
+          batch.set(docRef, data, SetOptions(merge: true));
+        }
+        if (++ops >= 450) {
+          await flushBatch();
+        }
+      }
+      await flushBatch();
+
+      // Remove successfully flushed deltas
+      _pendingDeltas.removeWhere((d) => deltasToFlush.contains(d));
+      await LocalStore.savePendingDeltas(_pendingDeltas);
+      await LocalStore.setLastSyncedAt(DateTime.now());
+      _syncPending = _pendingDeltas.isNotEmpty;
+      await LocalStore.setPendingSync(_syncPending);
+      notifyListeners();
+      debugPrint('[AppProvider] Successfully flushed ${deltasToFlush.length} delta(s) to Firestore.');
+    } catch (e) {
+      _syncPending = true;
+      await LocalStore.setPendingSync(true);
+      notifyListeners();
+      debugPrint('[AppProvider] Error flushing deltas to Firestore: $e');
+      rethrow;
+    }
+  }
+
+  /// Fallback: Pushes full in-memory state to Firestore (e.g. manual full backup).
   Future<void> _pushToFirestore() async {
     if (user == null) return;
-    _syncPending = false;
     try {
       final uid = user!.uid;
       final accountsRef   = _db.collection('users').doc(uid).collection('accounts');
@@ -306,11 +442,18 @@ class AppProvider extends ChangeNotifier {
         if (++ops >= 450) await flush();
       }
       await flush();
+      _pendingDeltas.clear();
+      await LocalStore.savePendingDeltas([]);
       await LocalStore.setLastSyncedAt(DateTime.now());
       await LocalStore.setPendingSync(false);
-      debugPrint('[AppProvider] Auto-sync to Firestore successful.');
+      _syncPending = false;
+      notifyListeners();
+      debugPrint('[AppProvider] Full push to Firestore successful.');
     } catch (e) {
-      debugPrint('[AppProvider] Auto-sync error: $e');
+      _syncPending = true;
+      await LocalStore.setPendingSync(true);
+      notifyListeners();
+      debugPrint('[AppProvider] Full push error: $e');
     }
   }
 
@@ -329,7 +472,12 @@ class AppProvider extends ChangeNotifier {
     ]);
   }
 
-
+  Future<void> _saveTransactionsAndAccounts() async {
+    await Future.wait([
+      LocalStore.saveAccounts(accounts),
+      LocalStore.saveTransactions(transactions),
+    ]);
+  }
 
   Future<void> updateAccountsOrder(List<Account> reorderedList) async {
     if (user == null) return;
@@ -338,9 +486,11 @@ class AppProvider extends ChangeNotifier {
     for (int i = 0; i < accounts.length; i++) {
       final a = accounts[i];
       accounts[i] = Account(id: a.id, name: a.name, balance: a.balance, createdAt: a.createdAt, position: i);
+      _enqueueDelta('accounts', a.id, 'set', accounts[i].toMap());
     }
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _scheduleSyncToCloud();
   }
 
   // ── Helper: compute account balance delta in-memory ────────────────────
@@ -380,8 +530,14 @@ class AppProvider extends ChangeNotifier {
     transactions = [tx, ...transactions];
     _applyTransactionToAccounts(tx);
     notifyListeners();
-    // Persist locally, then sync to cloud.
-    await _saveAllToLocal();
+    // Persist locally, then sync delta to cloud.
+    await _saveTransactionsAndAccounts();
+    _enqueueDelta('transactions', tx.id, 'set', tx.toMap());
+    for (final a in accounts) {
+      if (a.id == tx.accountId || (tx.type == 'transfer' && a.id == tx.toAccountId)) {
+        _enqueueDelta('accounts', a.id, 'set', a.toMap());
+      }
+    }
     _scheduleSyncToCloud();
   }
 
@@ -391,8 +547,14 @@ class AppProvider extends ChangeNotifier {
     transactions = transactions.where((t) => t.id != transaction.id).toList();
     _applyTransactionToAccounts(transaction, reverse: true);
     notifyListeners();
-    // Persist locally, then sync to cloud.
-    await _saveAllToLocal();
+    // Persist locally, then sync delta to cloud.
+    await _saveTransactionsAndAccounts();
+    _enqueueDelta('transactions', transaction.id, 'delete', null);
+    for (final a in accounts) {
+      if (a.id == transaction.accountId || (transaction.type == 'transfer' && a.id == transaction.toAccountId)) {
+        _enqueueDelta('accounts', a.id, 'set', a.toMap());
+      }
+    }
     _scheduleSyncToCloud();
   }
 
@@ -403,8 +565,16 @@ class AppProvider extends ChangeNotifier {
     _applyTransactionToAccounts(newTx);
     transactions = transactions.map((t) => t.id == oldTx.id ? newTx : t).toList();
     notifyListeners();
-    // Persist locally, then sync to cloud.
-    await _saveAllToLocal();
+    // Persist locally, then sync delta to cloud.
+    await _saveTransactionsAndAccounts();
+    _enqueueDelta('transactions', newTx.id, 'set', newTx.toMap());
+    for (final a in accounts) {
+      if (a.id == newTx.accountId || a.id == oldTx.accountId ||
+          (newTx.type == 'transfer' && a.id == newTx.toAccountId) ||
+          (oldTx.type == 'transfer' && a.id == oldTx.toAccountId)) {
+        _enqueueDelta('accounts', a.id, 'set', a.toMap());
+      }
+    }
     _scheduleSyncToCloud();
   }
 
@@ -416,6 +586,7 @@ class AppProvider extends ChangeNotifier {
     accounts = [...accounts, acc];
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _enqueueDelta('accounts', acc.id, 'set', acc.toMap());
     _scheduleSyncToCloud();
   }
 
@@ -426,6 +597,8 @@ class AppProvider extends ChangeNotifier {
         : a).toList();
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    final acc = accounts.firstWhere((a) => a.id == id);
+    _enqueueDelta('accounts', acc.id, 'set', acc.toMap());
     _scheduleSyncToCloud();
   }
 
@@ -434,6 +607,7 @@ class AppProvider extends ChangeNotifier {
     accounts = accounts.where((a) => a.id != id).toList();
     notifyListeners();
     await LocalStore.saveAccounts(accounts);
+    _enqueueDelta('accounts', id, 'delete', null);
     _scheduleSyncToCloud();
   }
 
@@ -444,6 +618,7 @@ class AppProvider extends ChangeNotifier {
     categories = [...categories, cat];
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    _enqueueDelta('categories', cat.id, 'set', cat.toMap());
     _scheduleSyncToCloud();
   }
 
@@ -454,6 +629,8 @@ class AppProvider extends ChangeNotifier {
         : c).toList();
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    final cat = categories.firstWhere((c) => c.id == id);
+    _enqueueDelta('categories', cat.id, 'set', cat.toMap());
     _scheduleSyncToCloud();
   }
 
@@ -462,6 +639,7 @@ class AppProvider extends ChangeNotifier {
     categories = categories.where((c) => c.id != id).toList();
     notifyListeners();
     await LocalStore.saveCategories(categories);
+    _enqueueDelta('categories', id, 'delete', null);
     _scheduleSyncToCloud();
   }
 
@@ -700,6 +878,13 @@ class AppProvider extends ChangeNotifier {
       Map<String, double> accountBalanceUpdates = {};
       final transColRef = _db.collection('users').doc(user!.uid).collection('transactions');
 
+      final Map<String, Account> accountNameMap = {
+        for (final a in accounts) a.name.toLowerCase(): a,
+      };
+      final Map<String, CategoryModel> categoryNameMap = {
+        for (final c in categories) c.name.toLowerCase(): c,
+      };
+
       for (int i = dataStartIndex; i < rows.length; i++) {
         var row = rows[i];
         if (row.length < 3) {
@@ -720,7 +905,9 @@ class AppProvider extends ChangeNotifier {
         
         String timeStr = row[timeIdx].toString().trim();
         String typeStr = row[typeIdx].toString().trim();
-        double amount = double.tryParse(row[amountIdx].toString().replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0.0;
+        final parsed = double.tryParse(row[amountIdx].toString().replaceAll(RegExp(r'[^0-9.]'), ''));
+        if (parsed == null || parsed <= 0) continue;
+        final double amount = parsed;
         
         String categoryName = (catIdx != -1 && row.length > catIdx && row[catIdx].toString().trim().isNotEmpty) ? row[catIdx].toString().trim() : 'Uncategorized';
         String accRaw = (accIdx != -1 && row.length > accIdx) ? row[accIdx].toString().trim() : '';
@@ -783,20 +970,15 @@ class AppProvider extends ChangeNotifier {
         }
         
         // Find or create source account
-        Account? acc;
-        for (final a in accounts) {
-          if (a.name.toLowerCase() == accountName.toLowerCase()) {
-            acc = a;
-            break;
-          }
-        }
-        
+        final accKey = accountName.toLowerCase();
+        Account? acc = accountNameMap[accKey];
         String accId;
         if (acc == null) {
           final doc = accountsRef.doc();
           accId = doc.id;
           acc = Account(id: accId, name: accountName, balance: 0, createdAt: DateTime.now().millisecondsSinceEpoch);
           accounts.add(acc);
+          accountNameMap[accKey] = acc;
           currentBatch.set(doc, acc.toMap());
           operationCount++;
         } else {
@@ -806,35 +988,24 @@ class AppProvider extends ChangeNotifier {
         // Handle target account for transfers
         String toAccId = '';
         if (type == 'transfer' && toAccountName.isNotEmpty) {
-            Account? toAcc;
-            for (final a in accounts) {
-              if (a.name.toLowerCase() == toAccountName.toLowerCase()) {
-                toAcc = a;
-                break;
-              }
-            }
-            
-            if (toAcc == null) {
-              final doc = accountsRef.doc();
-              toAccId = doc.id;
-              toAcc = Account(id: toAccId, name: toAccountName, balance: 0, createdAt: DateTime.now().millisecondsSinceEpoch);
-              accounts.add(toAcc);
-              currentBatch.set(doc, toAcc.toMap());
-              operationCount++;
-            } else {
-              toAccId = toAcc.id;
-            }
-          }
-        
-        // Find or create category
-        CategoryModel? cat;
-        for (final c in categories) {
-          if (c.name.toLowerCase() == categoryName.toLowerCase()) {
-            cat = c;
-            break;
+          final toAccKey = toAccountName.toLowerCase();
+          Account? toAcc = accountNameMap[toAccKey];
+          if (toAcc == null) {
+            final doc = accountsRef.doc();
+            toAccId = doc.id;
+            toAcc = Account(id: toAccId, name: toAccountName, balance: 0, createdAt: DateTime.now().millisecondsSinceEpoch);
+            accounts.add(toAcc);
+            accountNameMap[toAccKey] = toAcc;
+            currentBatch.set(doc, toAcc.toMap());
+            operationCount++;
+          } else {
+            toAccId = toAcc.id;
           }
         }
-        
+
+        // Find or create category
+        final catKey = categoryName.toLowerCase();
+        CategoryModel? cat = categoryNameMap[catKey];
         String catId;
         if (cat == null) {
           final icon = _getIconForCategory(categoryName);
@@ -842,6 +1013,7 @@ class AppProvider extends ChangeNotifier {
           catId = doc.id;
           cat = CategoryModel(id: catId, name: categoryName, icon: icon, type: type);
           categories.add(cat);
+          categoryNameMap[catKey] = cat;
           currentBatch.set(doc, cat.toMap());
           operationCount++;
         } else {
@@ -873,10 +1045,12 @@ class AppProvider extends ChangeNotifier {
         } else if (type == 'transfer') {
           currentBalance -= amount; // Deduct from source
           if (toAccId.isNotEmpty) {
-             Account toAcc = accounts.firstWhere((a) => a.id == toAccId);
-             double toBalance = accountBalanceUpdates[toAccId] ?? toAcc.balance;
-             toBalance += amount; // Add to target
-             accountBalanceUpdates[toAccId] = toBalance;
+             Account? toAcc = accounts.cast<Account?>().firstWhere((a) => a?.id == toAccId, orElse: () => null);
+             if (toAcc != null) {
+               double toBalance = accountBalanceUpdates[toAccId] ?? toAcc.balance;
+               toBalance += amount; // Add to target
+               accountBalanceUpdates[toAccId] = toBalance;
+             }
           }
         }
         accountBalanceUpdates[accId] = currentBalance;
@@ -1020,16 +1194,25 @@ class AppProvider extends ChangeNotifier {
   Future<void> _restorePhotoFromFirestore(String uid) async {
     try {
       final doc = await _db.collection('users').doc(uid).get();
+      if (user == null) return;
       final data = doc.data();
       if (data == null || !data.containsKey('photoBase64')) return;
       final base64Str = data['photoBase64'] as String;
-      final bytes = base64Decode(base64Str);
+      
+      Uint8List bytes;
+      try {
+        bytes = base64Decode(base64Str);
+      } on FormatException {
+        debugPrint('Profile photo data corrupted in Firestore — skipping restore.');
+        return;
+      }
+      
       final dir = await getApplicationDocumentsDirectory();
       final filePath = '${dir.path}/profile_photo_$uid.jpg';
       await dart_io.File(filePath).writeAsBytes(bytes);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('profile_photo_$uid', filePath);
-      user = AppUser(uid: user!.uid, email: user!.email, photoPath: filePath, name: user!.name);
+      user = AppUser(uid: uid, email: user?.email ?? '', photoPath: filePath, name: user?.name);
       notifyListeners();
     } catch (e) {
       debugPrint('Error restoring photo from Firestore: $e');

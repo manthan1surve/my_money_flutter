@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../providers/app_provider.dart';
 import '../../models/models.dart';
+import '../base/base_dialog.dart';
 import 'loading_spinner.dart';
 import 'validation_dialog.dart';
 
@@ -113,8 +114,6 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<AppProvider>(context);
-    
-    // Calculate summary
     final endOfDay = DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59, 999);
     final filteredTx = provider.transactions.where((tx) {
       final date = DateTime.fromMillisecondsSinceEpoch(tx.date);
@@ -123,212 +122,208 @@ class _ExportReportDialogState extends State<ExportReportDialog> {
 
     final expenses = filteredTx.where((t) => t.type == 'expense').toList();
     final incomes = filteredTx.where((t) => t.type == 'income').toList();
-    
     final expenseCategories = expenses.map((e) => e.categoryId).toSet().length;
     final incomeCategories = incomes.map((e) => e.categoryId).toSet().length;
 
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      const Center(
-                        child: Text(
-                          "Export Records",
-                          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Positioned(
-                        right: 0,
-                        child: GestureDetector(
-                          onTap: () => Navigator.of(context).pop(),
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.close, color: Colors.white, size: 18),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  const Text("Select the date range you want to export:", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 12),
-                  
-                  // Date Picker Buttons
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                    ),
-                    child: Row(
+    return _ExportReportModal(
+      startDate: _startDate,
+      endDate: _endDate,
+      dateFormat: _dateFormat,
+      filteredTxCount: filteredTx.length,
+      expenses: expenses,
+      incomes: incomes,
+      expenseCategories: expenseCategories,
+      incomeCategories: incomeCategories,
+      categories: provider.categories,
+      onPickStartDate: _pickStartDate,
+      onPickEndDate: _pickEndDate,
+      onCategoryIconsBuilder: _buildCategoryIcons,
+      onExport: filteredTx.isEmpty
+          ? null
+          : () async {
+              try {
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx) => const GlassModalDialog(
+                    title: 'Exporting...',
+                    content: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: _pickStartDate,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Column(
-                                children: [
-                                  const Text("From:", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 8),
-                                  Text(_dateFormat.format(_startDate).toUpperCase(), style: const TextStyle(color: Color(0xFFFFB74D), fontSize: 15, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        Container(width: 1, height: 50, color: Colors.white.withValues(alpha: 0.1)),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: _pickEndDate,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              child: Column(
-                                children: [
-                                  const Text("To:", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 8),
-                                  Text(_dateFormat.format(_endDate).toUpperCase(), style: const TextStyle(color: Color(0xFFFFB74D), fontSize: 15, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
+                        SizedBox(width: 24, height: 24, child: LoadingSpinner()),
+                        SizedBox(width: 20),
+                        Text("Exporting CSV...", style: TextStyle(color: Colors.white)),
                       ],
                     ),
                   ),
-                  
-                  const SizedBox(height: 24),
-                  const Text("Export Summary:", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  
-                  // Summary Box
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Found a total of ${filteredTx.length} records within the selected date range.",
-                          style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
-                        ),
-                        if (filteredTx.isNotEmpty) ...[
-                          const SizedBox(height: 16),
-                          Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
-                          const SizedBox(height: 16),
-                          
-                          if (expenses.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                const Icon(Icons.circle, color: Colors.white54, size: 6),
-                                const SizedBox(width: 8),
-                                Expanded(child: Text("${expenses.length} expense records in $expenseCategories categories.", style: const TextStyle(color: Colors.white, fontSize: 14))),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _buildCategoryIcons(expenses, provider.categories, const Color(0xFFFE0000)),
-                            const SizedBox(height: 16),
-                          ],
-                          
-                          if (incomes.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                const Icon(Icons.circle, color: Colors.white54, size: 6),
-                                const SizedBox(width: 8),
-                                Expanded(child: Text("${incomes.length} income records in $incomeCategories categories.", style: const TextStyle(color: Colors.white, fontSize: 14))),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _buildCategoryIcons(incomes, provider.categories, const Color(0xFF00FE06)),
-                          ],
-                        ]
-                      ],
-                    ),
-                  ),
-                  
+                );
+                await provider.exportTransactionsCSV(startDate: _startDate, endDate: _endDate);
+                if (context.mounted) {
+                  Navigator.of(context).pop(); // dismiss loading
+                  Navigator.of(context).pop(); // dismiss dialog
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.of(context).pop(); // dismiss loading
+                  showValidationDialog(context, 'Something went wrong: $e');
+                }
+              }
+            },
+    );
+  }
+}
 
-                  
-                  const SizedBox(height: 32),
-                  
-                  // Buttons
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      onPressed: filteredTx.isEmpty ? null : () async {
-                        try {
-                          showDialog(
-                            context: context,
-                            barrierDismissible: false,
-                            builder: (ctx) => const AlertDialog(
-                              backgroundColor: Color(0xFF1E1E1E),
-                              content: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SizedBox(width: 24, height: 24, child: LoadingSpinner()),
-                                  SizedBox(width: 20),
-                                  Text("Exporting CSV...", style: TextStyle(color: Colors.white)),
-                                ],
-                              ),
-                            ),
-                          );
-                          await provider.exportTransactionsCSV(startDate: _startDate, endDate: _endDate);
-                          if (context.mounted) {
-                            Navigator.of(context).pop(); // dismiss loading
-                            Navigator.of(context).pop(); // dismiss dialog
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            Navigator.of(context).pop(); // dismiss loading
-                            showValidationDialog(context, 'Something went wrong: $e');
-                          }
-                        }
-                      },
-                      child: const Text("EXPORT CSV", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+/// Inner class extending OO BaseModalDialog for Export Modal UI.
+class _ExportReportModal extends BaseModalDialog {
+  final DateTime startDate;
+  final DateTime endDate;
+  final DateFormat dateFormat;
+  final int filteredTxCount;
+  final List<TransactionModel> expenses;
+  final List<TransactionModel> incomes;
+  final int expenseCategories;
+  final int incomeCategories;
+  final List<CategoryModel> categories;
+  final VoidCallback onPickStartDate;
+  final VoidCallback onPickEndDate;
+  final Widget Function(List<TransactionModel>, List<CategoryModel>, Color) onCategoryIconsBuilder;
+  final VoidCallback? onExport;
+
+  const _ExportReportModal({
+    required this.startDate,
+    required this.endDate,
+    required this.dateFormat,
+    required this.filteredTxCount,
+    required this.expenses,
+    required this.incomes,
+    required this.expenseCategories,
+    required this.incomeCategories,
+    required this.categories,
+    required this.onPickStartDate,
+    required this.onPickEndDate,
+    required this.onCategoryIconsBuilder,
+    required this.onExport,
+  }) : super(title: 'Export Records');
+
+  @override
+  Widget buildDialogContent(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text("Select the date range you want to export:", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: onPickStartDate,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Column(
+                      children: [
+                        const Text("From:", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Text(dateFormat.format(startDate).toUpperCase(), style: const TextStyle(color: Color(0xFFFFB74D), fontSize: 15, fontWeight: FontWeight.bold)),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+              Container(width: 1, height: 50, color: Colors.white.withValues(alpha: 0.1)),
+              Expanded(
+                child: GestureDetector(
+                  onTap: onPickEndDate,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Column(
+                      children: [
+                        const Text("To:", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Text(dateFormat.format(endDate).toUpperCase(), style: const TextStyle(color: Color(0xFFFFB74D), fontSize: 15, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      ),
+        const SizedBox(height: 24),
+        const Text("Export Summary:", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Found a total of $filteredTxCount records within the selected date range.",
+                style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+              ),
+              if (filteredTxCount > 0) ...[
+                const SizedBox(height: 16),
+                Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+                const SizedBox(height: 16),
+                if (expenses.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.circle, color: Colors.white54, size: 6),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text("${expenses.length} expense records in $expenseCategories categories.", style: const TextStyle(color: Colors.white, fontSize: 14))),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  onCategoryIconsBuilder(expenses, categories, const Color(0xFFFE0000)),
+                  const SizedBox(height: 16),
+                ],
+                if (incomes.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.circle, color: Colors.white54, size: 6),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text("${incomes.length} income records in $incomeCategories categories.", style: const TextStyle(color: Colors.white, fontSize: 14))),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  onCategoryIconsBuilder(incomes, categories, const Color(0xFF00FE06)),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ],
     );
+  }
+
+  @override
+  List<Widget>? buildDialogActions(BuildContext context) {
+    return [
+      Expanded(
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          onPressed: onExport,
+          child: const Text("EXPORT CSV", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+        ),
+      ),
+    ];
   }
 }

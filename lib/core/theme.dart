@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
@@ -10,19 +10,19 @@ class AppColors {
   static const Color overlayStrong = Color(0x2EFFFFFF); // ~18% opacity
   static const Color overlaySoft = Color(0x14FFFFFF);   // ~8% opacity
   static const Color inputFill = Color(0x1AFFFFFF);     // ~10% opacity
-  static const Color accent = Color(0xFF9B8CFF);
-  static const Color accentBright = Color(0xFF6AA8FF);
-  static const Color success = Color(0xFF72E0A6);
-  static const Color danger = Color(0xFFFF7A90);
+  static const Color accent = Color(0xFFFFFFFF);
+  static const Color accentBright = Color(0xFFE0E0E0);
+  static const Color success = Color(0xFFE0E0E0);
+  static const Color danger = Color(0xFF888888);
   
-  static const Color chart1 = Color(0xFFFE0000);
-  static const Color chart2 = Color(0xFFFFEB3B);
-  static const Color chart3 = Color(0xFF9C27B0);
-  static const Color chart4 = Color(0xFF00FE06);
-  static const Color chart5 = Color(0xFFE91E63);
-  static const Color chart6 = Color(0xFF00BCD4);
-  static const Color chart7 = Color(0xFFFF9800);
-  static const Color chart8 = Color(0xFF3F51B5);
+  static const Color chart1 = Color(0xFFFFFFFF);
+  static const Color chart2 = Color(0xFFD0D0D0);
+  static const Color chart3 = Color(0xFFB0B0B0);
+  static const Color chart4 = Color(0xFF909090);
+  static const Color chart5 = Color(0xFF707070);
+  static const Color chart6 = Color(0xFF505050);
+  static const Color chart7 = Color(0xFFE0E0E0);
+  static const Color chart8 = Color(0xFFA0A0A0);
 }
 
 class AppSpacing {
@@ -42,7 +42,7 @@ class AppTypography {
         color: AppColors.textPrimary,
       );
 
-  static TextStyle get cardTitle => GoogleFonts.castoro(
+  static TextStyle get cardTitle => GoogleFonts.fraunces(
         fontSize: 22,
         height: 28 / 22,
         fontWeight: FontWeight.w700,

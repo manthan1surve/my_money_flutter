@@ -1,9 +1,20 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 class ConcentricRingsPainter extends CustomPainter {
   final List<Map<String, dynamic>> rings;
+
+  static final Paint _bgPaint = Paint()..style = PaintingStyle.stroke;
+  static final Paint _glowPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+  static final Paint _solidPaint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.round;
 
   ConcentricRingsPainter({
     required this.rings,
@@ -23,6 +34,12 @@ class ConcentricRingsPainter extends CustomPainter {
     double strokeWidth = min(maxStroke, requiredStroke);
     double gap = strokeWidth * gapRatio;
 
+    _bgPaint
+      ..color = Colors.white.withValues(alpha: 0.05)
+      ..strokeWidth = strokeWidth;
+    _glowPaint.strokeWidth = strokeWidth;
+    _solidPaint.strokeWidth = strokeWidth;
+
     for (int i = 0; i < rings.length; i++) {
       final ring = rings[i];
       final double radius = center - 5 - (strokeWidth / 2) - (i * (strokeWidth + gap));
@@ -33,26 +50,13 @@ class ConcentricRingsPainter extends CustomPainter {
       
       final Color color = ring['color'];
 
-      final Paint bgPaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.05)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth;
-      canvas.drawCircle(Offset(center, center), radius, bgPaint);
+      canvas.drawCircle(Offset(center, center), radius, _bgPaint);
 
-      final Paint glowPaint = Paint()
-        ..color = color.withValues(alpha: 0.6)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-      canvas.drawArc(rect, -pi / 2, sweepAngle, false, glowPaint);
+      _glowPaint.color = color.withValues(alpha: 0.6);
+      canvas.drawArc(rect, -pi / 2, sweepAngle, false, _glowPaint);
 
-      final Paint solidPaint = Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, -pi / 2, sweepAngle, false, solidPaint);
+      _solidPaint.color = color;
+      canvas.drawArc(rect, -pi / 2, sweepAngle, false, _solidPaint);
     }
   }
 
@@ -92,7 +96,7 @@ class CustomLineChart extends StatefulWidget {
     required this.isExpense,
     this.defaultIndex,
     this.onActiveItemChanged,
-    this.labelWidth = 30,
+    this.labelWidth = 36,
   });
 
   @override
@@ -122,10 +126,10 @@ class _CustomLineChartState extends State<CustomLineChart> {
     super.dispose();
   }
 
-  final double _padL = 0;
-  final double _padR = 0;
+  final double _padL = 16;
+  final double _padR = 16;
   final double _padTop = 20;
-  final double _padBottom = 28;
+  final double _padBottom = 34;
 
   int _getDisplayIndex(int index) => index < 0 ? widget.data.length - 1 : index;
 
@@ -149,20 +153,26 @@ class _CustomLineChartState extends State<CustomLineChart> {
     double x = widget.data.length > 1
         ? _padL + (index / (widget.data.length - 1)) * graphW
         : _padL + graphW / 2;
-    double yRatio = niceMax > 0 ? widget.data[index]['total'] / niceMax : 0;
+    double yRatio = niceMax > 0 ? (widget.data[index]['total'] as num).toDouble() / niceMax : 0;
     double y = _padTop + graphH - (yRatio.clamp(0.0, 1.0) * graphH);
     return Offset(x, y);
   }
 
-  void _onPanUpdate(DragUpdateDetails d, Size size) {
-    final graphW = size.width - _padL - _padR;
-    final relX = (d.localPosition.dx - _padL).clamp(0.0, graphW);
-    final frac = relX / graphW;
-    final idx = (frac * (widget.data.length - 1)).round().clamp(0, widget.data.length - 1);
-    if (idx != _activeIndexNotifier.value) {
+  void _selectIndex(int index) {
+    final idx = index.clamp(0, widget.data.length - 1);
+    if (_activeIndexNotifier.value != idx) {
       _activeIndexNotifier.value = idx;
       widget.onActiveItemChanged?.call(widget.data[_getDisplayIndex(idx)]);
     }
+  }
+
+  void _onPanUpdate(DragUpdateDetails d, Size size) {
+    final graphW = size.width - _padL - _padR;
+    if (graphW <= 0 || widget.data.isEmpty) return;
+    final relX = (d.localPosition.dx - _padL).clamp(0.0, graphW);
+    final frac = relX / graphW;
+    final idx = (frac * (widget.data.length - 1)).round().clamp(0, widget.data.length - 1);
+    _selectIndex(idx);
   }
 
   @override
@@ -174,6 +184,13 @@ class _CustomLineChartState extends State<CustomLineChart> {
       final size = Size(constraints.maxWidth, constraints.maxHeight);
 
       return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (d) => _onPanUpdate(DragUpdateDetails(
+          globalPosition: d.globalPosition,
+          localPosition: d.localPosition,
+          delta: Offset.zero,
+          primaryDelta: 0,
+        ), size),
         onPanUpdate: (d) => _onPanUpdate(d, size),
         onTapDown: (d) => _onPanUpdate(DragUpdateDetails(
           globalPosition: d.globalPosition,
@@ -209,6 +226,21 @@ class _CustomLineChartState extends State<CustomLineChart> {
                 final activePt = _pointAt(displayIdx, size, niceMax);
                 final activeData = widget.data[displayIdx];
 
+                final rawTotal = (activeData['total'] as num?)?.toDouble() ?? 0.0;
+                final formattedAmount = rawTotal >= 1000
+                    ? NumberFormat.decimalPattern('en_IN').format(rawTotal.round())
+                    : rawTotal.round().toString();
+
+                final graphW = size.width - _padL - _padR;
+                final double alignX = graphW > 0
+                    ? (((activePt.dx - _padL) / graphW) * 2 - 1.0).clamp(-1.0, 1.0)
+                    : 0.0;
+
+                final bool isNearTop = activePt.dy < 58;
+                final double tooltipTop = isNearTop
+                    ? (activePt.dy + 14).clamp(4.0, size.height - 60)
+                    : (activePt.dy - 56).clamp(4.0, size.height - 60);
+
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -229,50 +261,59 @@ class _CustomLineChartState extends State<CustomLineChart> {
                     ),
 
                     // Floating date & amount label above active point
-                    (() {
-                      const tooltipW = 60.0;
-                      final fraction = size.width > 0
-                          ? (activePt.dx / size.width).clamp(0.0, 1.0)
-                          : 0.5;
-                      final tooltipLeft = (activePt.dx - fraction * tooltipW)
-                          .clamp(0.0, size.width - tooltipW);
-                      final tooltipTop = (activePt.dy - 54)
-                          .clamp(4.0, size.height - 60);
-                      return Positioned(
-                        left: tooltipLeft,
-                        top: tooltipTop,
+                    Positioned(
+                      top: tooltipTop,
+                      left: _padL,
+                      right: _padR,
+                      child: Align(
+                        alignment: Alignment(alignX, 0.0),
                         child: Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(8),
-                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 10)],
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                blurRadius: 10,
+                              ),
+                            ],
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
                             child: BackdropFilter(
                               filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOutCubic,
-                                width: tooltipW,
+                              child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                  ),
                                 ),
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
                                     Text(
-                                      activeData['label'],
-                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10, fontWeight: FontWeight.w500),
+                                      activeData['label']?.toString() ?? '',
+                                      style: GoogleFonts.fraunces(
+                                        color: Colors.white.withValues(alpha: 0.7),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                       textAlign: TextAlign.center,
+                                      softWrap: false,
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      '${widget.currencySymbol}${activeData['total'].round()}',
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      '${widget.currencySymbol}$formattedAmount',
+                                      style: GoogleFonts.fraunces(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                       textAlign: TextAlign.center,
+                                      softWrap: false,
                                     ),
                                   ],
                                 ),
@@ -280,8 +321,8 @@ class _CustomLineChartState extends State<CustomLineChart> {
                             ),
                           ),
                         ),
-                      );
-                    })(),
+                      ),
+                    ),
                   ],
                 );
               },
@@ -289,51 +330,80 @@ class _CustomLineChartState extends State<CustomLineChart> {
 
             // X-axis: labels
             Positioned(
-              left: 12,
-              right: 12,
+              left: _padL,
+              right: _padR,
               bottom: 6,
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   return SizedBox(
-                    height: 15,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: widget.data.asMap().entries.map((entry) {
-                        final i = entry.key;
-                        final label = entry.value['label'].toString();
-                        String displayText = label;
-                        bool showLabel = true;
+                    height: 18,
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: _activeIndexNotifier,
+                      builder: (context, activeIndex, _) {
+                        final displayIdx = _getDisplayIndex(activeIndex);
+                        final totalItems = widget.data.length;
 
-                        if (!widget.showAllLabels && widget.data.length > 12) {
-                          final parts = label.split(' ');
-                          if (parts.length > 1) {
-                            final day = int.tryParse(parts.last) ?? 1;
-                            showLabel = day % 2 == 0;
-                            // Only show the day number to prevent overlap
-                            displayText = day.toString();
-                          } else {
-                            showLabel = (i + 1) % 2 == 0;
-                          }
-                        }
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: widget.data.asMap().entries.map((entry) {
+                            final i = entry.key;
+                            final item = entry.value;
 
-                        if (!showLabel) return const SizedBox.shrink();
+                            bool showLabel = true;
+                            String displayText = item['axisLabel']?.toString() ?? item['label']?.toString() ?? '';
 
-                        final double leftPct = widget.data.length > 1 ? (i / (widget.data.length - 1)) : 0.5;
-                        final double leftPos = leftPct * constraints.maxWidth;
-                        final double half = widget.labelWidth / 2;
+                            if (totalItems > 14) {
+                              // Monthly view (~28-31 days)
+                              final int day = (item['dayNumber'] as int?) ?? (i + 1);
+                              final int totalDays = (item['daysInMonth'] as int?) ?? totalItems;
 
-                        return Positioned(
-                          left: leftPos - half,
-                          width: widget.labelWidth,
-                          child: Text(
-                            displayText,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.visible,
-                          ),
+                              // Show Day 1, multiples of 5 (5, 10, 15, 20, 25), and last day of the month
+                              showLabel = (day == 1) || (day % 5 == 0) || (day == totalDays);
+                              // Avoid crowding 30 and 31 together on 31-day months
+                              if (day == 30 && totalDays == 31) {
+                                showLabel = false;
+                              }
+                              displayText = day.toString();
+                            } else if (totalItems > 8) {
+                              // Yearly view (12 months)
+                              if (!widget.showAllLabels) {
+                                showLabel = (i % 2 == 0) || (i == totalItems - 1);
+                              }
+                            }
+
+                            if (!showLabel) return const SizedBox.shrink();
+
+                            final double leftPct = totalItems > 1 ? (i / (totalItems - 1)) : 0.5;
+                            final double leftPos = leftPct * constraints.maxWidth;
+                            const double labelW = 40.0;
+                            final bool isActive = (i == displayIdx);
+
+                            return Positioned(
+                              left: leftPos - (labelW / 2),
+                              width: labelW,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _selectIndex(i),
+                                child: AnimatedDefaultTextStyle(
+                                  duration: const Duration(milliseconds: 150),
+                                  style: GoogleFonts.fraunces(
+                                    color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.6),
+                                    fontSize: 11,
+                                    fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                                    letterSpacing: 0.2,
+                                  ),
+                                  child: Text(
+                                    displayText,
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.visible,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
                         );
-                      }).toList(),
+                      },
                     ),
                   );
                 },
@@ -390,7 +460,7 @@ class _StaticLineChartPainter extends CustomPainter {
 
     // Horizontal grid lines
     double y = graphBottom;
-    while (y >= 0) {
+    while (y >= padTop) {
       canvas.drawLine(Offset(graphLeft, y), Offset(graphRight, y), gridPaint);
       y -= gridSpacing;
     }
@@ -398,7 +468,7 @@ class _StaticLineChartPainter extends CustomPainter {
     // Vertical grid lines
     double x = graphLeft;
     while (x <= graphRight) {
-      canvas.drawLine(Offset(x, 0), Offset(x, graphBottom), gridPaint);
+      canvas.drawLine(Offset(x, padTop), Offset(x, graphBottom), gridPaint);
       x += gridSpacing;
     }
 
@@ -425,18 +495,18 @@ class _StaticLineChartPainter extends CustomPainter {
       ..shader = ui.Gradient.linear(
         Offset(0, padTop),
         Offset(0, graphBottom),
-        [color.withValues(alpha: 0.55), color.withValues(alpha: 0.18), color.withValues(alpha: 0.0)],
-        [0.0, 0.55, 1.0],
+        [color.withValues(alpha: 0.45), color.withValues(alpha: 0.12), color.withValues(alpha: 0.0)],
+        [0.0, 0.6, 1.0],
       );
     canvas.drawPath(fillPath, fillPaint);
 
     // Glow
     canvas.drawPath(path, Paint()
-      ..color = color.withValues(alpha: 0.5)
+      ..color = color.withValues(alpha: 0.4)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 6
+      ..strokeWidth = 5
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
 
     // Line
     canvas.drawPath(path, Paint()
@@ -448,7 +518,7 @@ class _StaticLineChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _StaticLineChartPainter old) =>
-      old.data != data || old.niceMax != niceMax;
+      old.data != data || old.niceMax != niceMax || old.color != color;
 }
 
 class _ActiveDotPainter extends CustomPainter {
@@ -488,26 +558,27 @@ class _ActiveDotPainter extends CustomPainter {
     final pt = points[activeIndex];
 
     // Vertical dashed line
-    const dashH = 5.0;
+    const dashH = 4.0;
     final dashPaint = Paint()
-      ..color = color.withValues(alpha: 0.35)
-      ..strokeWidth = 1;
+      ..color = color.withValues(alpha: 0.4)
+      ..strokeWidth = 1.2;
     double dy = pt.dy;
     while (dy < graphBottom) {
-      canvas.drawLine(Offset(pt.dx, dy), Offset(pt.dx, dy + dashH), dashPaint);
+      canvas.drawLine(Offset(pt.dx, dy), Offset(pt.dx, min(dy + dashH, graphBottom)), dashPaint);
       dy += dashH * 2;
     }
 
     // Outer glow ring
-    canvas.drawCircle(pt, 14, Paint()..color = color.withValues(alpha: 0.18)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
-    // White-filled inner circle (like reference)
-    canvas.drawCircle(pt, 7, Paint()..color = color);
-    canvas.drawCircle(pt, 4, Paint()..color = Colors.white);
+    canvas.drawCircle(pt, 12, Paint()..color = color.withValues(alpha: 0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+    // Colored ring
+    canvas.drawCircle(pt, 6, Paint()..color = color);
+    // White inner dot
+    canvas.drawCircle(pt, 3.5, Paint()..color = Colors.white);
   }
 
   @override
   bool shouldRepaint(covariant _ActiveDotPainter old) =>
-      old.activeIndex != activeIndex || old.data != data || old.niceMax != niceMax;
+      old.activeIndex != activeIndex || old.data != data || old.niceMax != niceMax || old.color != color;
 }
 
 

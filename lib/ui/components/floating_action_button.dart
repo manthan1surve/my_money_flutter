@@ -41,10 +41,10 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
   void initState() {
     super.initState();
     _progressController = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 450));
+        vsync: this, duration: const Duration(milliseconds: 350));
     _progressAnim = CurvedAnimation(
         parent: _progressController,
-        curve: Curves.easeOutQuint,
+        curve: Curves.easeOutCubic,
         reverseCurve: Curves.easeInCubic);
 
     _iconController = AnimationController(vsync: this);
@@ -103,14 +103,15 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
 
   void _collapse() {
     HapticFeedback.lightImpact();
-    FocusScope.of(context).unfocus();
+    SystemChannels.textInput.invokeMethod('TextInput.hide');
+    FocusManager.instance.primaryFocus?.unfocus();
     FloatingActionButtonMorph.editNotifier.value = null;
 
     _fadeTimer?.cancel();
     _fadeController.animateTo(0.0,
-        duration: const Duration(milliseconds: 200), curve: Curves.easeInCubic);
+        duration: const Duration(milliseconds: 150), curve: Curves.easeIn);
     _iconController.animateTo(0.0,
-        duration: const Duration(milliseconds: 300), curve: Curves.easeInCubic);
+        duration: const Duration(milliseconds: 250), curve: Curves.easeInCubic);
 
     _progressController.reverse();
   }
@@ -171,8 +172,8 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
             final finalBottom = isVisible ? currentBottom : -100.0;
 
             return AnimatedPositioned(
-              duration: const Duration(milliseconds: 750),
-              curve: Curves.easeInOutCubic,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
               right: currentRight,
               bottom: finalBottom,
               child: GestureDetector(
@@ -210,30 +211,31 @@ class _FloatingActionButtonMorphState extends State<FloatingActionButtonMorph>
                           ),
                         ),
 
-                        // Form content
-                        OverflowBox(
-                          minWidth: expandedWidth,
-                          maxWidth: expandedWidth,
-                          minHeight: expandedHeight - 20,
-                          maxHeight: expandedHeight - 20,
-                          child: Opacity(
-                            opacity: fadeProgress,
-                            child: Container(
-                              padding: const EdgeInsets.only(top: 20),
-                              width: expandedWidth,
-                              height: expandedHeight - 20,
-                              child: IgnorePointer(
-                                ignoring: !_isExpanded || fadeProgress < 0.5,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Expanded(child: child!),
-                                  ],
+                        // Form content — completely excluded from paint/layout when fully collapsed
+                        if (fadeProgress > 0.001)
+                          OverflowBox(
+                            minWidth: expandedWidth,
+                            maxWidth: expandedWidth,
+                            minHeight: expandedHeight - 20,
+                            maxHeight: expandedHeight - 20,
+                            child: Opacity(
+                              opacity: fadeProgress,
+                              child: Container(
+                                padding: const EdgeInsets.only(top: 20),
+                                width: expandedWidth,
+                                height: expandedHeight - 20,
+                                child: IgnorePointer(
+                                  ignoring: !_isExpanded || fadeProgress < 0.5,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Expanded(child: child!),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
 
                         // Close / Add icon — centered when collapsed, top-right when expanded
                         Positioned.fill(

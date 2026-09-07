@@ -31,20 +31,14 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
   provider: ^6.1.5+1
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
   cloud_firestore: ^6.6.0
   shared_preferences: ^2.5.5
   google_fonts: ^8.1.0
-  video_player: ^2.11.1
-  fl_chart: ^1.2.0
   google_sign_in: ^6.2.1
   intl: ^0.20.3
-  flutter_svg: ^2.3.0
   file_picker: ^10.3.10
   csv: ^8.0.0
   path_provider: ^2.1.6
@@ -74,8 +68,19 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Explicitly listed — only files actually referenced in Dart code.
+  # Do NOT switch back to 'assets/' wildcard; it bundles everything in the
+  # folder (including scratch files, screenshots, etc.) into the release APK.
   assets:
-    - assets/
+    - assets/avatar.png
+    - assets/google.png
+    - assets/dasborad.png
+    - assets/accounts.png
+    - assets/analytics.png
+    - assets/catgorgy.png
+    - assets/adaptive-icon.png
+    - assets/icon.png
+    - assets/splash-icon.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -106,6 +111,6 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/pee.png"
+  image_path: "assets/icon.png"
   min_sdk_android: 21
 

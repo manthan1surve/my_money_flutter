@@ -1,11 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../../core/theme.dart';
-
 import '../../models/models.dart';
 import '../../providers/app_provider.dart';
-import '../components/app_background.dart';
+import '../base/base_screen.dart';
+import '../base/base_card.dart';
+import '../base/base_dialog.dart';
 import '../components/glass_card.dart';
 import '../components/dropdown_selector.dart';
 import '../components/loading_spinner.dart';
@@ -23,361 +24,490 @@ const _currencies = [
   {'id': 'SGD', 'name': 'Singapore', 'code': 'SGD', 'symbol': 'S\$'},
 ];
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends BaseScreen {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context);
-    final user = provider.user;
-    final currency = provider.currency;
+  BaseScreenState<ProfileScreen> createState() => _ProfileScreenState();
+}
 
-    // Find selected currency model from our list
+class _ProfileScreenState extends BaseScreenState<ProfileScreen> {
+  @override
+  String? get screenTitle => "Profile";
+
+  @override
+  bool get showBackButton => true;
+
+  bool _isSyncingOnline = false;
+
+  Future<void> _handleManualSync(AppProvider provider) async {
+    if (_isSyncingOnline) return;
+    setState(() {
+      _isSyncingOnline = true;
+    });
+    try {
+      await provider.syncOnline();
+      if (mounted) {
+        showSuccessNotification(
+          context,
+          'Data Synced Successfully',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showValidationDialog(context, 'Sync failed: ${e.toString().replaceAll('Exception: ', '')}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncingOnline = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget buildBody(BuildContext context) {
+    final user = context.select((AppProvider p) => p.user);
+    final currency = context.select((AppProvider p) => p.currency);
+    final isSynced = context.select((AppProvider p) => p.isSynced);
+
     final selectedCurrency = _currencies.firstWhere(
       (c) => c['code'] == currency.code,
       orElse: () => _currencies.first,
     );
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppBackground(
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: const Icon(Icons.chevron_left, color: Colors.white, size: 30),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          GestureDetector(
+            onTap: () => context.read<AppProvider>().pickProfilePhoto(),
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: 88,
+                  height: 88,
+                  padding: const EdgeInsets.all(3.0),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.4),
+                    border: Border.all(
+                      color: isSynced ? const Color(0xFF00E676) : const Color(0xFFFF3D00),
+                      width: 3.0,
                     ),
-                    const SizedBox(width: 10),
-                    Text("Profile", style: AppTypography.screenTitle),
-                    const Spacer(),
-                    const SizedBox(width: 30),
-                  ],
-                ),
-              ),
-
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-                  child: Column(
-                    children: [
-                      // Avatar
-                      const SizedBox(height: 20),
-                      GestureDetector(
-                        onTap: () => provider.pickProfilePhoto(),
-                        child: Stack(
-                          alignment: Alignment.bottomRight,
-                          children: [
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.withValues(alpha: 0.1),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
-                              ),
-                              child: ClipOval(
-                                child: user?.photoPath != null
-                                  ? Image.file(
-                                      File(user!.photoPath!),
-                                      width: 80,
-                                      height: 80,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) => Image.asset(
-                                        'assets/avatar.png',
-                                        width: 80,
-                                        height: 80,
-                                        fit: BoxFit.cover,
-                                        color: Colors.white,
-                                        colorBlendMode: BlendMode.srcIn,
-                                      ),
-                                    )
-                                  : Image.asset(
-                                      'assets/avatar.png',
-                                      width: 80,
-                                      height: 80,
-                                      fit: BoxFit.cover,
-                                      color: Colors.white,
-                                      colorBlendMode: BlendMode.srcIn,
-                                    ),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF6366F1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.edit, size: 12, color: Colors.white),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 15),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            user?.name ?? user?.email.split('@').first ?? 'User',
-                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => _showEditNameDialog(
-                                context, provider, user?.name ?? user?.email.split('@').first ?? 'User'),
-                            child: const Icon(Icons.edit, color: Colors.white70, size: 18),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        user?.email ?? '',
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14),
-                      ),
-                      const SizedBox(height: 40),
-
-                      // Settings Card
-                      GlassCard(
-                        padding: const EdgeInsets.all(20),
-                        margin: const EdgeInsets.only(bottom: 30),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'ACCOUNT SETTINGS',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.5),
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-
-                            // Currency Dropdown
-                            DropdownSelector<Map<String, String>>(
-                              label: 'Currency',
-                              items: _currencies.cast<Map<String, String>>(),
-                              selectedItem: selectedCurrency.cast<String, String>(),
-                              onSelect: (c) {
-                                provider.updateCurrency(CurrencyModel(
-                                  code: c['code']!,
-                                  symbol: c['symbol']!,
-                                  name: c['name']!,
-                                ));
-                              },
-                              getName: (c) => '${c['symbol']}  ${c['name']} (${c['code']})',
-                              getId: (c) => c['id']!,
-                            ),
-                            const SizedBox(height: 10),
-
-                            _buildMenuItem(Icons.download_outlined, 'Import Records (CSV)', context, onTap: () async {
-                              final progressNotifier = ValueNotifier<ImportStatus>(
-                                ImportStatus(isDone: false, current: 0, total: 0)
-                              );
-                              bool dialogShown = false;
-
-                              try {
-                                final count = await provider.importTransactionsCSV(
-                                  onStartImport: () async {
-                                    final overwrite = await showDialog<bool>(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        backgroundColor: const Color(0xFF1E1E1E),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                        title: const Text('Overwrite Transactions?', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                                        content: const Text('Do you want to overwrite your existing transactions with the imported ones, or append them?', style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)),
-                                        actionsAlignment: MainAxisAlignment.end,
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () => Navigator.of(ctx).pop(null), // cancel
-                                            child: const Text('Cancel', style: TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
-                                          ),
-                                          TextButton(
-                                            onPressed: () => Navigator.of(ctx).pop(false),
-                                            child: const Text('Append', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                                          ),
-                                          TextButton(
-                                            onPressed: () => Navigator.of(ctx).pop(true),
-                                            child: const Text('Overwrite', style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-
-                                    if (overwrite == null) return null;
-
-                                    if (!context.mounted) return null;
-                                    dialogShown = true;
-                                    showDialog(
-                                      context: context,
-                                      barrierDismissible: false,
-                                      builder: (ctx) => ImportProgressDialog(notifier: progressNotifier),
-                                    );
-                                    return overwrite;
-                                  },
-                                  onProgress: (current, total) {
-                                    progressNotifier.value = ImportStatus(
-                                      isDone: false,
-                                      current: current,
-                                      total: total,
-                                    );
-                                  },
-                                );
-
-                                if (count != -1) {
-                                  progressNotifier.value = ImportStatus(
-                                    isDone: true,
-                                    current: count,
-                                    total: count,
-                                  );
-                                }
-                              } catch (e) {
-                                String errorMsg = e.toString();
-                                if (errorMsg.startsWith('Exception: ')) {
-                                  errorMsg = errorMsg.substring(11);
-                                }
-                                if (dialogShown) {
-                                  progressNotifier.value = ImportStatus(
-                                    isDone: true,
-                                    error: errorMsg,
-                                  );
-                                } else {
-                                  if (context.mounted) {
-                                    showValidationDialog(context, errorMsg);
-                                  }
-                                }
-                              }
-                            }),
-                            _buildMenuItem(Icons.upload_outlined, 'Export Records (CSV)', context, onTap: () async {
-                              try {
-                                showDialog(
-                                  context: context,
-                                  barrierDismissible: false,
-                                  builder: (ctx) => const AlertDialog(
-                                    backgroundColor: Color(0xFF1E1E1E),
-                                    content: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        SizedBox(width: 24, height: 24, child: LoadingSpinner()),
-                                        SizedBox(width: 20),
-                                        Text("Exporting data...", style: TextStyle(color: Colors.white)),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                                await provider.exportTransactionsCSV();
-                                if (context.mounted) {
-                                  Navigator.of(context).pop(); // dismiss loading dialog
-                                }
-                              } catch (e) {
-                                if (context.mounted) {
-                                  Navigator.of(context).pop(); // dismiss loading dialog
-                                  showValidationDialog(context, 'Something went wrong: $e');
-                                }
-                              }
-                            }),
-                            _buildMenuItem(Icons.delete_forever_outlined, 'Clear All Data', context, onTap: () async {
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (ctx) => AlertDialog(
-                                  backgroundColor: const Color(0xFF1E1E1E),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  title: const Text('Are you sure?', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                                  content: const Text('This will delete all your accounts, transactions, and categories. This action cannot be undone.', style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)),
-                                  actionsAlignment: MainAxisAlignment.end,
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.of(ctx).pop(false),
-                                      child: const Text('No', style: TextStyle(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => Navigator.of(ctx).pop(true),
-                                      child: const Text('Yes', style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (confirm == true) {
-                                if (context.mounted) {
-                                  showDialog(
-                                    context: context,
-                                    barrierDismissible: false,
-                                    builder: (ctx) => const AlertDialog(
-                                      backgroundColor: Color(0xFF1E1E1E),
-                                      content: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          SizedBox(width: 24, height: 24, child: LoadingSpinner()),
-                                          SizedBox(width: 20),
-                                          Text("Clearing data...", style: TextStyle(color: Colors.white)),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }
-                                
-                                await provider.clearAllData();
-                                
-                                if (context.mounted) {
-                                  Navigator.of(context).pop(); // Dismiss loading dialog
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('All data has been cleared.'))
-                                  );
-                                }
-                              }
-                            }),
-                          ],
-                        ),
-                      ),
-
-                      // Logout Button
-                      GestureDetector(
-                        onTap: () async {
-                          await provider.logout();
-                          if (context.mounted) {
-                            Navigator.of(context).popUntil((route) => route.isFirst);
-                          }
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          decoration: BoxDecoration(
-                            color: const Color(0x1AFE0000),
-                            borderRadius: BorderRadius.circular(15),
-                            border: Border.all(color: const Color(0x33FE0000)),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.logout, color: Color(0xFFFE0000), size: 22),
-                              SizedBox(width: 10),
-                              Text(
-                                'Logout',
-                                style: TextStyle(color: Color(0xFFFE0000), fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 40),
-                      Text(
-                        'Version 1.0.0',
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.2), fontSize: 12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isSynced ? const Color(0xFF00E676) : const Color(0xFFFF3D00))
+                            .withValues(alpha: 0.5),
+                        blurRadius: 10,
+                        spreadRadius: 1,
                       ),
                     ],
                   ),
+                  child: ClipOval(
+                    child: user?.photoPath != null
+                      ? Image.file(
+                          File(user!.photoPath!),
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Image.asset(
+                            'assets/avatar.png',
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                            color: Colors.white,
+                            colorBlendMode: BlendMode.srcIn,
+                          ),
+                        )
+                      : Image.asset(
+                          'assets/avatar.png',
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                          color: Colors.white,
+                          colorBlendMode: BlendMode.srcIn,
+                        ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF6366F1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit, size: 12, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 15),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                user?.name ?? user?.email.split('@').first ?? 'User',
+                style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _showEditNameDialog(
+                    context, context.read<AppProvider>(), user?.name ?? user?.email.split('@').first ?? 'User'),
+                child: const Icon(Icons.edit, color: Colors.white70, size: 18),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            user?.email ?? '',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: (_isSyncingOnline
+                          ? const Color(0xFFFF9800)
+                          : isSynced
+                              ? const Color(0xFF00E676)
+                              : const Color(0xFFFF3D00))
+                      .withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: (_isSyncingOnline
+                            ? const Color(0xFFFF9800)
+                            : isSynced
+                                ? const Color(0xFF00E676)
+                                : const Color(0xFFFF3D00))
+                        .withValues(alpha: 0.4),
+                    width: 1,
+                  ),
+                  boxShadow: _isSyncingOnline
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFFFF9800).withValues(alpha: 0.25),
+                            blurRadius: 8,
+                            spreadRadius: 1,
+                          ),
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isSyncingOnline
+                          ? Icons.cloud_sync
+                          : isSynced
+                              ? Icons.cloud_done
+                              : Icons.cloud_off,
+                      size: 14,
+                      color: _isSyncingOnline
+                          ? const Color(0xFFFF9800)
+                          : isSynced
+                              ? const Color(0xFF00E676)
+                              : const Color(0xFFFF3D00),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      _isSyncingOnline
+                          ? 'Syncing…'
+                          : isSynced
+                              ? 'Cloud Synced'
+                              : 'Sync Pending',
+                      style: TextStyle(
+                        color: _isSyncingOnline
+                            ? const Color(0xFFFF9800)
+                            : isSynced
+                                ? const Color(0xFF00E676)
+                                : const Color(0xFFFF3D00),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _handleManualSync(context.read<AppProvider>()),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: _isSyncingOnline
+                        ? const Color(0xFFFF9800).withValues(alpha: 0.18)
+                        : Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isSyncingOnline
+                          ? const Color(0xFFFF9800).withValues(alpha: 0.7)
+                          : Colors.white.withValues(alpha: 0.15),
+                      width: 1,
+                    ),
+                    boxShadow: _isSyncingOnline
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFFFF9800).withValues(alpha: 0.35),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : [],
+                  ),
+                  child: _isSyncingOnline
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFFF9800),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.refresh,
+                          size: 14,
+                          color: Colors.white,
+                        ),
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 40),
+
+          GlassCardWidget(
+            padding: const EdgeInsets.all(20),
+            margin: const EdgeInsets.only(bottom: 30),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ACCOUNT SETTINGS',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                DropdownSelector<Map<String, String>>(
+                  label: 'Currency',
+                  items: _currencies.cast<Map<String, String>>(),
+                  selectedItem: selectedCurrency.cast<String, String>(),
+                  onSelect: (c) {
+                    context.read<AppProvider>().updateCurrency(CurrencyModel(
+                      code: c['code']!,
+                      symbol: c['symbol']!,
+                      name: c['name']!,
+                    ));
+                  },
+                  getName: (c) => '${c['symbol']}  ${c['name']} (${c['code']})',
+                  getId: (c) => c['id']!,
+                ),
+                const SizedBox(height: 10),
+
+                _buildMenuItem(Icons.download_outlined, 'Import Records (CSV)', context, onTap: () async {
+                  final progressNotifier = ValueNotifier<ImportStatus>(
+                    ImportStatus(isDone: false, current: 0, total: 0)
+                  );
+                  bool dialogShown = false;
+
+                  try {
+                    final count = await context.read<AppProvider>().importTransactionsCSV(
+                      onStartImport: () async {
+                        final overwrite = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => GlassModalDialog(
+                            title: 'Overwrite Transactions?',
+                            content: const Text('Do you want to overwrite your existing transactions with the imported ones, or append them?', style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(null),
+                                child: Text('Cancel', style: GoogleFonts.fraunces(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                                child: Text('Append', style: GoogleFonts.fraunces(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                                child: Text('Overwrite', style: GoogleFonts.fraunces(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (overwrite == null) return null;
+
+                        if (!context.mounted) return null;
+                        dialogShown = true;
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (ctx) => ImportProgressDialog(notifier: progressNotifier),
+                        );
+                        return overwrite;
+                      },
+                      onProgress: (current, total) {
+                        progressNotifier.value = ImportStatus(
+                          isDone: false,
+                          current: current,
+                          total: total,
+                        );
+                      },
+                    );
+
+                    if (count != -1) {
+                      progressNotifier.value = ImportStatus(
+                        isDone: true,
+                        current: count,
+                        total: count,
+                      );
+                    }
+                  } catch (e) {
+                    String errorMsg = e.toString();
+                    if (errorMsg.startsWith('Exception: ')) {
+                      errorMsg = errorMsg.substring(11);
+                    }
+                    if (dialogShown) {
+                      progressNotifier.value = ImportStatus(
+                        isDone: true,
+                        error: errorMsg,
+                      );
+                    } else {
+                      if (context.mounted) {
+                        showValidationDialog(context, errorMsg);
+                      }
+                    }
+                  }
+                }),
+                _buildMenuItem(Icons.upload_outlined, 'Export Records (CSV)', context, onTap: () async {
+                  try {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) => const GlassModalDialog(
+                        title: 'Exporting Data',
+                        content: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(width: 24, height: 24, child: LoadingSpinner()),
+                            SizedBox(width: 20),
+                            Text("Exporting data...", style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                    );
+                    await context.read<AppProvider>().exportTransactionsCSV();
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                      showValidationDialog(context, 'Something went wrong: $e');
+                    }
+                  }
+                }),
+                _buildMenuItem(Icons.delete_forever_outlined, 'Clear All Data', context, onTap: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => GlassModalDialog(
+                      title: 'Are you sure?',
+                      content: const Text('This will delete all your accounts, transactions, and categories. This action cannot be undone.', style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4)),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: Text('No', style: GoogleFonts.fraunces(color: Colors.white54, fontSize: 14, fontWeight: FontWeight.w600)),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: Text('Yes', style: GoogleFonts.fraunces(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    if (!context.mounted) return;
+                    final provider = context.read<AppProvider>();
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (ctx) => const GlassModalDialog(
+                        title: 'Clearing Data',
+                        content: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(width: 24, height: 24, child: LoadingSpinner()),
+                            SizedBox(width: 20),
+                            Text("Clearing data...", style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                    );
+
+                    await provider.clearAllData();
+
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                      showSuccessNotification(
+                        context,
+                        'Data Cleared',
+                        'All accounts, transactions, and categories have been cleared.',
+                      );
+                    }
+                  }
+                }),
+              ],
+            ),
+          ),
+
+          GestureDetector(
+            onTap: () async {
+              await context.read<AppProvider>().logout();
+              if (context.mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFE0000),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0x33FE0000)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.logout, color: Color(0xFFFE0000), size: 22),
+                  SizedBox(width: 10),
+                  Text(
+                    'Logout',
+                    style: TextStyle(color: Color(0xFFFE0000), fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 40),
+          Text(
+            'Version 1.0.0',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.2), fontSize: 12),
+          ),
+        ],
       ),
     );
   }
@@ -389,17 +519,17 @@ class ProfileScreen extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
         ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        child: Row(
-          children: [
-            Icon(icon, color: Colors.white, size: 22),
-            const SizedBox(width: 15),
-            Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16))),
-            Icon(Icons.chevron_right, color: Colors.white.withValues(alpha: 0.3), size: 22),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.white, size: 22),
+              const SizedBox(width: 15),
+              Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16))),
+              Icon(Icons.chevron_right, color: Colors.white.withValues(alpha: 0.3), size: 22),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -409,33 +539,44 @@ class ProfileScreen extends StatelessWidget {
     return showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: const Text('Edit Username', style: TextStyle(color: Colors.white)),
-          content: TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Enter new username',
-              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-              enabledBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white54)),
-              focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+        return GlassModalDialog(
+          title: 'Edit Username',
+          content: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
             ),
-            autofocus: true,
+            child: TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white),
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                hintText: 'Enter new username',
+                hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                border: InputBorder.none,
+              ),
+              autofocus: true,
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              onPressed: () {
+                FocusManager.instance.primaryFocus?.unfocus();
+                Navigator.pop(context);
+              },
+              child: Text('Cancel', style: GoogleFonts.fraunces(color: Colors.white70)),
             ),
             TextButton(
               onPressed: () {
+                FocusManager.instance.primaryFocus?.unfocus();
                 if (controller.text.trim().isNotEmpty) {
                   provider.updateUserName(controller.text.trim());
                 }
                 Navigator.pop(context);
               },
-              child: const Text('Save', style: TextStyle(color: Color(0xFF6366F1))),
+              child: Text('Save', style: GoogleFonts.fraunces(color: const Color(0xFF6366F1))),
             ),
           ],
         );
@@ -499,7 +640,7 @@ class _ImportProgressDialogState extends State<ImportProgressDialog> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        child: const Text("OK", style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
+                        child: Text("OK", style: GoogleFonts.fraunces(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ],
@@ -510,16 +651,9 @@ class _ImportProgressDialogState extends State<ImportProgressDialog> {
         }
 
         if (status.isDone) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(
-              children: [
-                Icon(Icons.check_circle_outline, color: Colors.green, size: 24),
-                SizedBox(width: 10),
-                Text("Import Complete", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              ],
-            ),
+          return GlassModalDialog(
+            titleIcon: const Icon(Icons.check_circle_outline, color: Colors.green, size: 24),
+            title: "Import Complete",
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,18 +669,17 @@ class _ImportProgressDialogState extends State<ImportProgressDialog> {
                 ),
               ],
             ),
-            actionsAlignment: MainAxisAlignment.end,
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text("OK", style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.w600)),
+                child: Text("OK", style: GoogleFonts.fraunces(color: Colors.green, fontSize: 14, fontWeight: FontWeight.w600)),
               ),
             ],
           );
         }
 
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
+        return GlassModalDialog(
+          title: 'Importing Records',
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

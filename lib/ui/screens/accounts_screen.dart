@@ -1,23 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
 import '../../providers/app_provider.dart';
 import '../../models/models.dart';
-import '../components/app_background.dart';
+import '../base/base_screen.dart';
+import '../base/base_card.dart';
+import '../base/ui_factory.dart';
+import '../base/base_dialog.dart';
 import '../components/blur_button.dart';
 import '../components/validation_dialog.dart';
 import '../../core/currency_format.dart';
 
-class AccountsScreen extends StatefulWidget {
+class AccountsScreen extends BaseScreen {
   const AccountsScreen({super.key});
 
   @override
-  State<AccountsScreen> createState() => _AccountsScreenState();
+  BaseScreenState<AccountsScreen> createState() => _AccountsScreenState();
 }
 
-class _AccountsScreenState extends State<AccountsScreen> {
+class _AccountsScreenState extends BaseScreenState<AccountsScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _balanceController = TextEditingController();
+
+  @override
+  bool get hasOwnBackground => false;
+
+  @override
+  String? get screenTitle => "Accounts";
 
   @override
   void dispose() {
@@ -27,6 +37,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
   }
 
   void _addAccount(AppProvider provider) async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final name = _nameController.text.trim();
     final balanceText = _balanceController.text.trim();
 
@@ -54,12 +65,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
       _nameController.clear();
       _balanceController.clear();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Account added successfully!')),
+        showSuccessNotification(
+          context,
+          'Account "$name" Created',
         );
       }
     } catch (e) {
-      _showError(e.toString());
+      if (mounted) _showError(e.toString());
     }
   }
 
@@ -96,78 +108,92 @@ class _AccountsScreenState extends State<AccountsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context);
+  Widget buildBody(BuildContext context) {
+    final accounts = context.select((AppProvider p) => p.accounts);
+    final currency = context.select((AppProvider p) => p.currency);
 
-    return AppBackground(
-      child: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 120),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20, top: 10),
-                child: Text("Accounts", style: AppTypography.screenTitle),
-              ),
-              
-              // Add Account Card
-              Container(
-                margin: const EdgeInsets.only(bottom: 30),
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-                ),
-                child: Column(
-                  children: [
-                    _buildTextField("Account Name", _nameController, false),
-                    const SizedBox(height: 15),
-                    _buildTextField("Initial Balance", _balanceController, true),
-                    const SizedBox(height: 20),
-                    BlurButton(
-                      text: "Add Account", 
-                      onPressed: () => _addAccount(provider),
-                    ),
-                  ],
-                ),
-              ),
-              
-              Text("Your Accounts", style: AppTypography.sectionTitle),
-              const SizedBox(height: 15),
-              
-              if (provider.accounts.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.only(top: 20),
-                    child: Text("No accounts found.", style: TextStyle(color: Colors.white54)),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 120),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SolidCardWidget(
+            margin: const EdgeInsets.only(bottom: 30),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Add New Account",
+                  style: GoogleFonts.fraunces(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
                   ),
-                )
-              else
-                ReorderableListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: provider.accounts.length,
-                  proxyDecorator: _proxyDecorator,
-                  onReorderItem: (oldIndex, newIndex) {
-                    final items = List<Account>.from(provider.accounts);
-                    final item = items.removeAt(oldIndex);
-                    items.insert(newIndex, item);
-                    provider.updateAccountsOrder(items);
-                  },
-                  itemBuilder: (context, index) {
-                    final account = provider.accounts[index];
-                    final isNegative = account.balance < 0;
-                    final formattedBalance = '${isNegative ? '-' : ''}${provider.currency.symbol}${account.balance.abs().formatIndianCurrency()}';
-                    return _buildAccountItem(account, formattedBalance, isNegative, provider, index);
-                  },
                 ),
-            ],
+                const SizedBox(height: 15),
+                _buildTextField("Account Name", _nameController, false),
+                const SizedBox(height: 15),
+                _buildTextField("Initial Balance", _balanceController, true),
+                const SizedBox(height: 20),
+                Center(
+                  child: BlurButton(
+                    text: "Add Account",
+                    onPressed: () => _addAccount(context.read<AppProvider>()),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+
+          UIComponentFactory.buildSectionHeader(title: "Your Accounts"),
+          const SizedBox(height: 15),
+
+          if (accounts.isEmpty)
+            UIComponentFactory.buildEmptyState(
+              message: "No accounts found.",
+              icon: Icons.account_balance_wallet_outlined,
+            )
+          else
+            ReorderableListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: accounts.length,
+              proxyDecorator: _proxyDecorator,
+              onReorderItem: (oldIndex, newIndex) {
+                final provider = context.read<AppProvider>();
+                final items = List<Account>.from(accounts);
+                final item = items.removeAt(oldIndex);
+                items.insert(newIndex, item);
+                provider.updateAccountsOrder(items);
+              },
+              itemBuilder: (context, index) {
+                final account = accounts[index];
+                final isNegative = account.balance < 0;
+                final formattedBalance = '${isNegative ? '-' : ''}${currency.symbol}${account.balance.abs().formatIndianCurrency()}';
+                return _AccountItemWidget(
+                  key: ValueKey(account.id),
+                  account: account,
+                  balance: formattedBalance,
+                  isNegative: isNegative,
+                  index: index,
+                  onEdit: () => _showEditAccountDialog(account, context.read<AppProvider>()),
+                  onDelete: () {
+                    try {
+                      context.read<AppProvider>().deleteAccount(account.id);
+                      showSuccessNotification(
+                        context,
+                        'Account "${account.name}" Deleted',
+                      );
+                    } catch (e) {
+                      _showError(e.toString());
+                    }
+                  },
+                );
+              },
+            ),
+        ],
       ),
     );
   }
@@ -175,129 +201,21 @@ class _AccountsScreenState extends State<AccountsScreen> {
   Widget _buildTextField(String hint, TextEditingController controller, bool isNumber) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF2A2A2A),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12.0),
-        border: Border.all(color: const Color(0xFF333333)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: TextField(
         controller: controller,
         keyboardType: isNumber ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white),
+        style: GoogleFonts.fraunces(color: Colors.white),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+          hintStyle: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.3)),
           contentPadding: const EdgeInsets.all(15),
           border: InputBorder.none,
         ),
-      ),
-    );
-  }
-  
-  Widget _buildAccountItem(Account account, String balance, bool isNegative, AppProvider provider, int index) {
-    return Container(
-      key: ValueKey(account.id),
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          ReorderableDragStartListener(
-            index: index,
-            child: Icon(
-              Icons.drag_handle,
-              color: Colors.white.withValues(alpha: 0.3),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              account.name, 
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 95,
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isNegative
-                          ? const Color(0xFFFE0000).withValues(alpha: 0.1)
-                          : Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isNegative
-                            ? const Color(0xFFFE0000).withValues(alpha: 0.2)
-                            : Colors.white.withValues(alpha: 0.1),
-                      ),
-                    ),
-                    child: Text(
-                      balance,
-                      style: TextStyle(
-                        color: isNegative ? const Color(0xFFFE0000) : Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Transform.translate(
-                offset: const Offset(5, 0),
-                child: Theme(
-                data: Theme.of(context).copyWith(
-                  cardColor: const Color(0xFF2A2A2A),
-                ),
-                child: PopupMenuButton<String>(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.more_vert, color: Colors.white70, size: 20),
-                  color: const Color(0xFF2A2A2A),
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  popUpAnimationStyle: AnimationStyle(
-                    curve: Curves.easeOut,
-                    duration: const Duration(milliseconds: 300),
-                  ),
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      _showEditAccountDialog(account, provider);
-                    } else if (value == 'delete') {
-                      _showDeleteConfirmation(account, provider);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'edit',
-                      child: Center(child: Text('Edit', style: TextStyle(color: Colors.white))),
-                    ),
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Center(child: Text('Delete', style: TextStyle(color: Color(0xFFFE0000)))),
-                    ),
-                  ],
-                ),
-              ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -306,22 +224,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
     final TextEditingController nameCtrl = TextEditingController(text: account.name);
     final TextEditingController balanceCtrl = TextEditingController(text: account.balance.toString());
 
-    showGeneralDialog(
+    showSmoothModalDialog(
       context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15.0),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
-          ),
-          title: const Text('Edit Account', style: TextStyle(color: Colors.white)),
+      builder: (context) {
+        return GlassModalDialog(
+          title: 'Edit Account',
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -333,10 +240,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              child: Text('Cancel', style: GoogleFonts.fraunces(color: Colors.white70)),
             ),
             TextButton(
               onPressed: () async {
+                FocusManager.instance.primaryFocus?.unfocus();
                 final name = nameCtrl.text.trim();
                 final balanceText = balanceCtrl.text.trim();
                 if (name.isEmpty || balanceText.isEmpty) {
@@ -348,87 +256,222 @@ class _AccountsScreenState extends State<AccountsScreen> {
                   _showError('Invalid balance amount.');
                   return;
                 }
-                
+
                 try {
                   provider.updateAccount(account.id, name, balance);
                   if (context.mounted) {
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Account updated successfully!')),
+                    showSuccessNotification(
+                      context,
+                      'Account "$name" Updated',
                     );
                   }
                 } catch (e) {
                   _showError(e.toString());
                 }
               },
-              child: const Text('Save', style: TextStyle(color: Colors.white)),
+              child: Text('Save', style: GoogleFonts.fraunces(color: Colors.white)),
             ),
           ],
-        );
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        return ScaleTransition(
-          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
-          child: FadeTransition(
-            opacity: animation,
-            child: child,
-          ),
         );
       },
     );
   }
 
-  void _showDeleteConfirmation(Account account, AppProvider provider) {
-    showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black54,
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15.0),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
-          ),
-          title: const Text('Delete Account', style: TextStyle(color: Colors.white)),
-          content: Text('Are you sure you want to delete ${account.name}?', style: const TextStyle(color: Colors.white70)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+}
+
+/// Account list item widget extending OO BaseListItemWidget.
+class _AccountItemWidget extends StatefulWidget {
+  final Account account;
+  final String balance;
+  final bool isNegative;
+  final int index;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _AccountItemWidget({
+    super.key,
+    required this.account,
+    required this.balance,
+    required this.isNegative,
+    required this.index,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_AccountItemWidget> createState() => _AccountItemWidgetState();
+}
+
+class _AccountItemWidgetState extends State<_AccountItemWidget> {
+  bool _isDeleteRevealed = false;
+  bool _isDismissing = false;
+
+  void _handleRemove() async {
+    if (!_isDeleteRevealed || _isDismissing) return;
+    setState(() {
+      _isDismissing = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 320));
+    if (mounted) {
+      widget.onDelete();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      offset: _isDismissing ? const Offset(-1.3, 0) : Offset.zero,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeInOutCubic,
+      child: AnimatedOpacity(
+        opacity: _isDismissing ? 0.0 : 1.0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeIn,
+        child: Stack(
+          alignment: Alignment.centerRight,
+          children: [
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: AnimatedOpacity(
+                opacity: _isDeleteRevealed ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 350),
+                curve: Curves.easeOutCubic,
+                child: GestureDetector(
+                  onTap: _handleRemove,
+                  child: Container(
+                    width: 125,
+                    padding: const EdgeInsets.only(left: 28, right: 18),
+                    margin: const EdgeInsets.symmetric(vertical: 4.0),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFE0000),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    alignment: Alignment.centerRight,
+                    child: Text('Remove', style: GoogleFonts.fraunces(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
             ),
-            TextButton(
-              onPressed: () async {
-                try {
-                  provider.deleteAccount(account.id);
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Account deleted successfully!')),
-                    );
-                  }
-                } catch (e) {
-                  _showError(e.toString());
-                }
-              },
-              child: const Text('Delete', style: TextStyle(color: Color(0xFFFE0000))),
+            AnimatedSlide(
+              offset: _isDeleteRevealed ? const Offset(-0.22, 0) : Offset.zero,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeOutCubic,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOutCubic,
+                    padding: const EdgeInsets.all(16.0),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF121212).withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      boxShadow: _isDeleteRevealed
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.45),
+                                blurRadius: 12,
+                                offset: const Offset(4, 0),
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Row(
+                      children: [
+                        ReorderableDragStartListener(
+                          index: widget.index,
+                          child: Icon(
+                            Icons.drag_handle,
+                            color: Colors.white.withValues(alpha: 0.3),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            widget.account.name,
+                            style: GoogleFonts.fraunces(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.35),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8.5),
+                                decoration: BoxDecoration(
+                                  color: widget.isNegative
+                                      ? const Color(0xFFFE0000).withValues(alpha: 0.1)
+                                      : Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: widget.isNegative
+                                        ? const Color(0xFFFE0000).withValues(alpha: 0.2)
+                                        : Colors.white.withValues(alpha: 0.1),
+                                  ),
+                                ),
+                                child: Text(
+                                  widget.balance,
+                                  style: GoogleFonts.fraunces(
+                                    color: widget.isNegative ? const Color(0xFFFE0000) : Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Material(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              shape: const CircleBorder(),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                onTap: widget.onEdit,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: Icon(Icons.edit_outlined, color: Colors.white70, size: 20),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Material(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              shape: const CircleBorder(),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                onTap: () {
+                                  setState(() {
+                                    _isDeleteRevealed = !_isDeleteRevealed;
+                                  });
+                                },
+                                child: const Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: Icon(Icons.close, color: Colors.white70, size: 20),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
-        );
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        return ScaleTransition(
-          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
-          child: FadeTransition(
-            opacity: animation,
-            child: child,
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

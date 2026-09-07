@@ -20,8 +20,13 @@ class AddTransactionForm extends StatefulWidget {
 }
 
 class _AddTransactionFormState extends State<AddTransactionForm> {
+  // Notifier so only the currency symbol colour updates on typing — not the whole form.
+  final _hasAmountNotifier = ValueNotifier<bool>(false);
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+
+  // Cached picker theme — built once, not on every build() call.
+  ThemeData? _cachedPickerTheme;
 
   String _type = 'expense';
   Account? _selectedAccount;
@@ -73,21 +78,24 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
 
   @override
   void dispose() {
+    _hasAmountNotifier.dispose();
     _amountController.dispose();
     _noteController.dispose();
     super.dispose();
   }
 
-  ThemeData get _pickerTheme => ThemeData.dark().copyWith(
-    colorScheme: const ColorScheme.dark(
-      primary: Colors.white,
-      onPrimary: Colors.black,
-      surface: Color(0x661A1A1A),
-      onSurface: Colors.white,
-    ),
-    dialogTheme: const DialogThemeData(backgroundColor: Color(0x661A1A1A)),
-    textTheme: GoogleFonts.castoroTextTheme(ThemeData.dark().textTheme),
-  );
+  ThemeData get _pickerTheme {
+    return _cachedPickerTheme ??= ThemeData.dark().copyWith(
+      colorScheme: const ColorScheme.dark(
+        primary: Colors.white,
+        onPrimary: Colors.black,
+        surface: Color(0x661A1A1A),
+        onSurface: Colors.white,
+      ),
+      dialogTheme: const DialogThemeData(backgroundColor: Color(0x661A1A1A)),
+      textTheme: GoogleFonts.castoroTextTheme(ThemeData.dark().textTheme),
+    );
+  }
 
   Future<void> _pickDateOnly() async {
     HapticFeedback.lightImpact();
@@ -98,7 +106,7 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
       lastDate: DateTime(2100),
       builder: (context, child) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Theme(data: _pickerTheme, child: child!),
+        child: Theme(data: _pickerTheme, child: child ?? const SizedBox()),
       ),
     );
     if (date != null && mounted) {
@@ -121,7 +129,7 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
       initialTime: TimeOfDay.fromDateTime(_selectedDate),
       builder: (context, child) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Theme(data: _pickerTheme, child: child!),
+        child: Theme(data: _pickerTheme, child: child ?? const SizedBox()),
       ),
     );
     if (time != null && mounted) {
@@ -147,6 +155,7 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
   }
 
   Future<void> _handleSave() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     HapticFeedback.mediumImpact();
     final amountText = _amountController.text.trim();
     if (amountText.isEmpty) {
@@ -190,9 +199,9 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
         type: _type,
         categoryId: _type == 'transfer' ? '' : (_selectedCategory?.id ?? ''),
         accountId: _selectedAccount!.id,
-        toAccountId: _type == 'transfer' ? _selectedToAccount!.id : '',
+        toAccountId: _type == 'transfer' ? (_selectedToAccount?.id ?? '') : '',
         note: _noteController.text.trim().isEmpty && _type == 'transfer' 
-            ? 'Transfer to ${_selectedToAccount!.name}' 
+            ? 'Transfer to ${_selectedToAccount?.name ?? 'account'}' 
             : _noteController.text.trim(),
         date: _selectedDate.millisecondsSinceEpoch,
       );
@@ -221,34 +230,48 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context);
-    final filteredCategories = provider.categories.where((c) => c.type == _type).toList();
-    final hasAmount = _amountController.text.isNotEmpty;
+    // Granular selects — form only rebuilds when accounts or categories change,
+    // NOT on every date/balance/sync update from the root AppProvider.
+    final currencySymbol = context.select((AppProvider p) => p.currency.symbol);
+    final accounts = context.select((AppProvider p) => p.accounts);
+    final filteredCategories = context
+        .select((AppProvider p) => p.categories)
+        .where((c) => c.type == _type)
+        .toList();
 
-    return LayoutBuilder(builder: (context, constraints) {
-      return ConstrainedBox(
-        constraints: BoxConstraints(minHeight: constraints.maxHeight),
-        child: Column(
-          children: [
-            const Spacer(),
-            // Hero Amount
-            Container(
-              alignment: Alignment.center,
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        provider.currency.symbol,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 0),
+      child: Column(
+        children: [
+          const Spacer(),
+          // Hero Amount
+          Container(
+            alignment: Alignment.center,
+            child: Column(
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // ValueListenableBuilder isolates colour-change rebuilds to
+                    // just this Text widget — the rest of the form stays untouched.
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _hasAmountNotifier,
+                      builder: (context, hasAmount, _) => Text(
+                        currencySymbol,
                         style: TextStyle(
                           fontSize: 48,
                           fontWeight: FontWeight.w300,
-                          color: hasAmount ? Colors.white : Colors.white.withValues(alpha: 0.3),
+                          color: hasAmount
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.3),
                         ),
                       ),
-                      IntrinsicWidth(
+                    ),
+                    IntrinsicWidth(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 48, maxWidth: 260),
                         child: TextField(
                           controller: _amountController,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -260,256 +283,145 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
                             color: Colors.white,
                           ),
                           decoration: InputDecoration(
-                            hintText: _amountController.text.isEmpty ? '0' : '',
-                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3)),
+                            hintText: '0',
+                            hintStyle: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.3)),
                             border: InputBorder.none,
                             isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 10),
                           ),
-                          onChanged: (val) => setState(() {}),
+                          onChanged: (val) {
+                            // Only notify the tiny ValueListenableBuilder above,
+                            // NOT a setState() that rebuilds the whole form.
+                            _hasAmountNotifier.value = val.isNotEmpty;
+                          },
                         ),
                       ),
-                    ],
-                  ),
-                  Container(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.1),
-                    width: 250,
-                  ),
-                ],
-              ),
+                    ),
+                  ],
+                ),
+                Container(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.1),
+                  width: 250,
+                ),
+              ],
             ),
-            const Spacer(),
-            // Type Toggle
-            Container(
+          ),
+          const Spacer(),
+          // Type Toggle — LayoutBuilder replaced with FractionallySizedBox +
+          // fixed measurements to avoid an inner layout pass during keyboard animation.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: SizedBox(
               width: double.infinity,
               height: 50,
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-              ),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final double toggleWidth = constraints.maxWidth;
                   final double pillWidth = (toggleWidth - 6) / 3;
-                  
                   double leftPos = 3.0;
                   if (_type == 'income') {
                     leftPos = 3.0 + pillWidth;
                   } else if (_type == 'transfer') {
                     leftPos = 3.0 + pillWidth * 2;
                   }
-
-                  return Stack(
-                    children: [
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 400),
-                        curve: Curves.easeOutQuart,
-                        left: leftPos,
-                        top: 3,
-                        child: Container(
-                          width: pillWidth,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _setType('expense'),
-                              child: Center(
-                                child: AnimatedDefaultTextStyle(
-                                  duration: const Duration(milliseconds: 400),
-                                  curve: Curves.easeOutQuart,
-                                  style: GoogleFonts.castoro(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: _type == 'expense' ? Colors.black : Colors.white.withValues(alpha: 0.65),
-                                  ),
-                                  child: const Text('Expense'),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _setType('income'),
-                              child: Center(
-                                child: AnimatedDefaultTextStyle(
-                                  duration: const Duration(milliseconds: 400),
-                                  curve: Curves.easeOutQuart,
-                                  style: GoogleFonts.castoro(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: _type == 'income' ? Colors.black : Colors.white.withValues(alpha: 0.65),
-                                  ),
-                                  child: const Text('Income'),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _setType('transfer'),
-                              child: Center(
-                                child: AnimatedDefaultTextStyle(
-                                  duration: const Duration(milliseconds: 400),
-                                  curve: Curves.easeOutQuart,
-                                  style: GoogleFonts.castoro(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: _type == 'transfer' ? Colors.black : Colors.white.withValues(alpha: 0.65),
-                                  ),
-                                  child: const Text('Transfer'),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-            const Spacer(),
-            // Note
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _noteController,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF121212).withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(30),
+                      border:
+                          Border.all(color: Colors.white.withValues(alpha: 0.08)),
                     ),
-                    decoration: InputDecoration(
-                      hintText: 'Add a note...',
-                      hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
-                  Container(
-                    height: 1,
-                    color: Colors.white.withValues(alpha: 0.1),
-                    width: double.infinity,
-                  ),
-                ],
-              ),
-            ),
-            const Spacer(),
-            // Dropdowns
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                children: [
-                  DropdownSelector<Account>(
-                    label: _type == 'transfer' ? 'FROM' : 'ACCOUNT',
-                    items: provider.accounts,
-                    selectedItem: _selectedAccount,
-                    onSelect: (acc) => setState(() => _selectedAccount = acc),
-                    placeholder: 'Select account',
-                    getName: (acc) => acc.name,
-                    getId: (acc) => acc.id,
-                  ),
-                  if (_type == 'transfer')
-                    DropdownSelector<Account>(
-                      label: 'TO',
-                      items: provider.accounts,
-                      selectedItem: _selectedToAccount,
-                      onSelect: (acc) => setState(() => _selectedToAccount = acc),
-                      placeholder: 'Select destination account',
-                      getName: (acc) => acc.name,
-                      getId: (acc) => acc.id,
-                    )
-                  else
-                    DropdownSelector<CategoryModel>(
-                      label: 'CATEGORY',
-                      items: filteredCategories,
-                      selectedItem: _selectedCategory,
-                      onSelect: (cat) => setState(() => _selectedCategory = cat),
-                      placeholder: 'Select category',
-                      getName: (cat) => cat.name,
-                      getIcon: (cat) => cat.icon,
-                      getId: (cat) => cat.id,
-                    ),
-                  Container(
-                    margin: const EdgeInsets.only(top: 16, bottom: 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Stack(
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8, left: 4),
-                          child: Text(
-                            'DATE & TIME',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.4),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1.2,
+                        AnimatedPositioned(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          left: leftPos,
+                          top: 3,
+                          child: Container(
+                            width: pillWidth,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(25),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                         Row(
                           children: [
-                            // Date chip — tapping only picks the date
                             Expanded(
                               child: GestureDetector(
-                                onTap: _pickDateOnly,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1A1A1A),
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.calendar_month_rounded, color: Colors.white.withValues(alpha: 0.7), size: 16),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        DateFormat('MMM dd, yyyy').format(_selectedDate),
-                                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                                      ),
-                                    ],
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _setType('expense'),
+                                child: Center(
+                                  child: AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutCubic,
+                                    style: GoogleFonts.fraunces(
+                                      fontSize: 14,
+                                      fontWeight: _type == 'expense'
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: _type == 'expense'
+                                          ? const Color(0xFFFE0000)
+                                          : Colors.white.withValues(alpha: 0.65),
+                                    ),
+                                    child: const Text('Expense'),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            // Time chip — tapping only picks the time
-                            GestureDetector(
-                              onTap: _pickTimeOnly,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1A1A1A),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.access_time_rounded, color: Colors.white.withValues(alpha: 0.7), size: 16),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      DateFormat('hh:mm a').format(_selectedDate),
-                                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _setType('income'),
+                                child: Center(
+                                  child: AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutCubic,
+                                    style: GoogleFonts.fraunces(
+                                      fontSize: 14,
+                                      fontWeight: _type == 'income'
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: _type == 'income'
+                                          ? const Color(0xFF00A82D)
+                                          : Colors.white.withValues(alpha: 0.65),
                                     ),
-                                  ],
+                                    child: const Text('Income'),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _setType('transfer'),
+                                child: Center(
+                                  child: AnimatedDefaultTextStyle(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutCubic,
+                                    style: GoogleFonts.fraunces(
+                                      fontSize: 14,
+                                      fontWeight: _type == 'transfer'
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: _type == 'transfer'
+                                          ? Colors.black
+                                          : Colors.white.withValues(alpha: 0.65),
+                                    ),
+                                    child: const Text('Transfer'),
+                                  ),
                                 ),
                               ),
                             ),
@@ -517,83 +429,250 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
                         ),
                       ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-            const Spacer(),
-            // Save Button
-            Center(
-              child: GestureDetector(
-                onTap: _handleSave,
-                child: Container(
-                  width: 220,
-                  height: 50,
-                  decoration: BoxDecoration(
+          ),
+          const Spacer(),
+          // Note
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _noteController,
+                  style: const TextStyle(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(35),
+                    fontSize: 15,
                   ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    _type == 'transfer' ? 'Transfer' : 'Save',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  decoration: InputDecoration(
+                    hintText: 'Add a note...',
+                    hintStyle:
+                        TextStyle(color: Colors.white.withValues(alpha: 0.2)),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+                Container(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.1),
+                  width: double.infinity,
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // Dropdowns
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                DropdownSelector<Account>(
+                  label: _type == 'transfer' ? 'FROM' : 'ACCOUNT',
+                  items: accounts,
+                  selectedItem: _selectedAccount,
+                  onSelect: (acc) => setState(() => _selectedAccount = acc),
+                  placeholder: 'Select account',
+                  getName: (acc) => acc.name,
+                  getId: (acc) => acc.id,
+                ),
+                if (_type == 'transfer')
+                  DropdownSelector<Account>(
+                    label: 'TO',
+                    items: accounts,
+                    selectedItem: _selectedToAccount,
+                    onSelect: (acc) =>
+                        setState(() => _selectedToAccount = acc),
+                    placeholder: 'Select destination account',
+                    getName: (acc) => acc.name,
+                    getId: (acc) => acc.id,
+                  )
+                else
+                  DropdownSelector<CategoryModel>(
+                    label: 'CATEGORY',
+                    items: filteredCategories,
+                    selectedItem: _selectedCategory,
+                    onSelect: (cat) =>
+                        setState(() => _selectedCategory = cat),
+                    placeholder: 'Select category',
+                    getName: (cat) => cat.name,
+                    getIcon: (cat) => cat.icon,
+                    getId: (cat) => cat.id,
+                  ),
+                Container(
+                  margin: const EdgeInsets.only(top: 16, bottom: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8, left: 4),
+                        child: Text(
+                          'DATE & TIME',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.4),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          // Date chip — tapping only picks the date
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: _pickDateOnly,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 13),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF161616)
+                                      .withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                      color: Colors.white
+                                          .withValues(alpha: 0.10)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.calendar_month_rounded,
+                                        color:
+                                            Colors.white.withValues(alpha: 0.7),
+                                        size: 16),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      DateFormat('MMM dd, yyyy')
+                                          .format(_selectedDate),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Time chip — tapping only picks the time
+                          GestureDetector(
+                            onTap: _pickTimeOnly,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 13),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF161616)
+                                    .withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                    color:
+                                        Colors.white.withValues(alpha: 0.10)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.access_time_rounded,
+                                      color:
+                                          Colors.white.withValues(alpha: 0.7),
+                                      size: 16),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    DateFormat('hh:mm a')
+                                        .format(_selectedDate),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // Save Button
+          Center(
+            child: GestureDetector(
+              onTap: _handleSave,
+              child: Container(
+                width: 220,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(35),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _type == 'transfer' ? 'Transfer' : 'Save',
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ),
-            const Spacer(),
-          ],
-        ),
-      );
-    });
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
   }
 }
 
 class IndianCurrencyFormatter extends TextInputFormatter {
+  // Static singleton — NumberFormat construction is expensive (locale lookup).
+  // Reusing one instance eliminates repeated allocations on every keystroke.
+  static final NumberFormat _fmt = NumberFormat.decimalPattern('en_IN');
+
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
     if (newValue.text.isEmpty) {
       return newValue;
     }
-    
+
     String cleanText = newValue.text.replaceAll(RegExp(r'[^0-9.]'), '');
-    
+
     if (cleanText.contains('.')) {
-      List<String> parts = cleanText.split('.');
+      final parts = cleanText.split('.');
       cleanText = '${parts[0]}.${parts.sublist(1).join()}';
     }
-    
-    List<String> parts = cleanText.split('.');
+
+    final parts = cleanText.split('.');
     String intPart = parts[0];
     String decPart = parts.length > 1 ? '.${parts[1]}' : '';
-    
+
     if (intPart.isNotEmpty) {
       final number = int.tryParse(intPart);
       if (number != null) {
-        intPart = NumberFormat.decimalPattern('en_IN').format(number);
+        intPart = _fmt.format(number);
       }
     }
-    
+
     if (newValue.text.endsWith('.') && decPart.isEmpty) {
       decPart = '.';
     }
-    
-    String formatted = intPart + decPart;
-    
-    int cursorOffset = newValue.selection.end;
+
+    final formatted = intPart + decPart;
+
     if (formatted == newValue.text) {
       return newValue;
     }
-    
-    cursorOffset = formatted.length;
-    
+
     return TextEditingValue(
       text: formatted,
-      selection: TextSelection.collapsed(offset: cursorOffset),
+      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }

@@ -1,7 +1,7 @@
-    import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'core/theme.dart';
 import 'providers/app_provider.dart';
 import 'ui/screens/app_navigator.dart';
@@ -12,12 +12,14 @@ void main() async {
   // We'll use try/catch to gracefully handle Firebase initialization for now
   try {
     await Firebase.initializeApp();
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: true,
-    );
   } catch (e) {
-    debugPrint("Firebase init error (if config missing): \$e");
+    debugPrint("Firebase init error (if config missing): $e");
   }
+
+  // Pre-load primary font to eliminate layout shifts (FOIT)
+  try {
+    GoogleFonts.pendingFonts([GoogleFonts.fraunces()]);
+  } catch (_) {}
 
   runApp(
     MultiProvider(
