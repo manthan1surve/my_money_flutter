@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../components/app_background.dart';
 import '../../core/theme.dart';
 
@@ -51,10 +52,41 @@ abstract class BaseScreenState<T extends BaseScreen> extends State<T> {
         children: [
           if (showBackButton) ...[
             GestureDetector(
-              onTap: onBackTapped,
-              child: const Icon(Icons.chevron_left, color: Colors.white, size: 30),
+              onTap: () {
+                HapticFeedback.lightImpact();
+                onBackTapped();
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: 0.10),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.20),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: const Padding(
+                  padding: EdgeInsets.only(right: 2.0),
+                  child: Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 14),
           ],
           if (title != null)
             Text(title, style: AppTypography.screenTitle),

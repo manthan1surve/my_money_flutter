@@ -45,8 +45,10 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
 
   List<TransactionModel>? _cachedAllTransactionsRef;
   List<CategoryModel>? _cachedCategoriesRef;
+  List<Account>? _cachedAccountsRef;
   String _cachedSearchQuery = '';
   Map<String, CategoryModel> _cachedCategoryMap = const {};
+  Map<String, Account> _cachedAccountMap = const {};
   final Map<int, List<dynamic>> _monthGroupedCache = {};
 
   @override
@@ -237,11 +239,17 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
   Widget buildBody(BuildContext context) {
     final transactions = context.select((AppProvider p) => p.transactions);
     final categories = context.select((AppProvider p) => p.categories);
+    final accounts = context.select((AppProvider p) => p.accounts);
     final currentDate = context.select((AppProvider p) => p.currentDate);
     final currency = context.select((AppProvider p) => p.currency);
     final user = context.select((AppProvider p) => p.user);
     final isSynced = context.select((AppProvider p) => p.isSynced);
     final width = MediaQuery.sizeOf(context).width;
+
+    if (!identical(_cachedAccountsRef, accounts)) {
+      _cachedAccountsRef = accounts;
+      _cachedAccountMap = {for (final a in accounts) a.id: a};
+    }
 
     return Column(
       children: [
@@ -513,6 +521,7 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
               return MonthTransactionsView(
                 transactions: monthTransactions,
                 categoryMap: _cachedCategoryMap,
+                accountMap: _cachedAccountMap,
                 currencySymbol: currency.symbol,
               );
             },
@@ -526,12 +535,14 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
 class MonthTransactionsView extends StatelessWidget {
   final List<dynamic> transactions;
   final Map<String, CategoryModel> categoryMap;
+  final Map<String, Account> accountMap;
   final String currencySymbol;
 
   const MonthTransactionsView({
     super.key,
     required this.transactions,
     required this.categoryMap,
+    required this.accountMap,
     required this.currencySymbol,
   });
 
@@ -561,7 +572,17 @@ class MonthTransactionsView extends StatelessWidget {
           );
         } else if (item is TransactionModel) {
           final cat = categoryMap[item.categoryId] ?? _defaultCategory;
-          return TransactionItem(transaction: item, category: cat);
+          final acc = accountMap[item.accountId];
+          final toAcc = item.type == 'transfer' && item.toAccountId.isNotEmpty
+              ? accountMap[item.toAccountId]
+              : null;
+          return TransactionItem(
+            transaction: item,
+            category: cat,
+            account: acc,
+            toAccount: toAcc,
+            currencySymbol: currencySymbol,
+          );
         }
         return const SizedBox.shrink();
       },

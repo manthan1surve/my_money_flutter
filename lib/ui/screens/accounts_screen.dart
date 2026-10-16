@@ -409,22 +409,15 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8.5),
                                 decoration: BoxDecoration(
-                                  color: widget.isNegative
-                                      ? const Color(0xFFFE0000).withValues(alpha: 0.1)
-                                      : Colors.white.withValues(alpha: 0.05),
+                                  color: Colors.white,
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: widget.isNegative
-                                        ? const Color(0xFFFE0000).withValues(alpha: 0.2)
-                                        : Colors.white.withValues(alpha: 0.1),
-                                  ),
                                 ),
                                 child: Text(
                                   widget.balance,
                                   style: GoogleFonts.fraunces(
-                                    color: widget.isNegative ? const Color(0xFFFE0000) : Colors.white,
+                                    color: Colors.black,
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,

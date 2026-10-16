@@ -37,6 +37,8 @@ abstract class BaseListItemWidget extends StatelessWidget {
     );
   }
 
+  static final TextStyle _defaultTextStyle = GoogleFonts.fraunces();
+
   @override
   Widget build(BuildContext context) {
     final subtitle = buildSubtitle(context);
@@ -47,7 +49,7 @@ abstract class BaseListItemWidget extends StatelessWidget {
       margin: margin,
       decoration: buildDecoration(context),
       child: DefaultTextStyle.merge(
-        style: GoogleFonts.fraunces(),
+        style: _defaultTextStyle,
         child: Row(
           children: [
             buildLeading(context),

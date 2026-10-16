@@ -13,6 +13,7 @@ import '../base/base_screen.dart';
 import '../base/base_card.dart';
 import '../components/loading_spinner.dart';
 import '../components/charts.dart';
+import '../components/ask_your_money_section.dart';
 import '../../core/currency_format.dart';
 
 const List<Color> colors = [
@@ -417,6 +418,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
     final currentDate = context.select((AppProvider p) => p.currentDate);
     final transactions = context.select((AppProvider p) => p.transactions);
     final categories = context.select((AppProvider p) => p.categories);
+    final accounts = context.select((AppProvider p) => p.accounts);
 
     if (widget.isActive) {
       final shouldDelay = _justBecameActive;
@@ -462,9 +464,16 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
           },
         ),
         SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 120),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
+
+              AskYourMoneySection(
+                transactions: transactions,
+                categories: categories,
+                accounts: accounts,
+                currency: currency,
+              ),
 
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -495,42 +504,91 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                       child: Builder(builder: (context) {
                         final options = ['1M', '6M', '1Y', 'All'];
                         final values = ['month', '6_months', '1_year', 'all_time'];
+                        final avgBalance = _avgIncome - _avgExpense;
 
                         return Row(
                           children: [
                             Expanded(
                               child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
+                                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
                                 decoration: BoxDecoration(
                                   color: Colors.black.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
                                 ),
                                 child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                   children: [
-                                    Text("Avg Income", style: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
-                                    const SizedBox(height: 4),
-                                    FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        "${currency.symbol}${_avgIncome.formatIndianCurrency()}",
-                                        style: GoogleFonts.fraunces(color: const Color(0xFF00FE06), fontSize: 22, fontWeight: FontWeight.bold),
-                                      ),
+                                    Column(
+                                      children: [
+                                        Text(
+                                          "Avg Balance",
+                                          style: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.center,
+                                          child: avgBalance < 0
+                                              ? BreathingText(
+                                                  text: "${currency.symbol}${avgBalance.abs().formatIndianCurrency()}",
+                                                  color: const Color(0xFFFE0000),
+                                                  fontSize: 17,
+                                                )
+                                              : Text(
+                                                  "${currency.symbol}${avgBalance.formatIndianCurrency()}",
+                                                  style: GoogleFonts.fraunces(
+                                                    color: Colors.white,
+                                                    fontSize: 17,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 32),
                                     Divider(color: Colors.white.withValues(alpha: 0.07), height: 1),
-                                    const SizedBox(height: 32),
-                                    Text("Avg Expense", style: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
-                                    const SizedBox(height: 4),
-                                    FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        "${currency.symbol}${_avgExpense.formatIndianCurrency()}",
-                                        style: GoogleFonts.fraunces(color: const Color(0xFFFE0000), fontSize: 22, fontWeight: FontWeight.bold),
-                                      ),
+                                    Column(
+                                      children: [
+                                        Text(
+                                          "Avg Income",
+                                          style: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            "${currency.symbol}${_avgIncome.formatIndianCurrency()}",
+                                            style: GoogleFonts.fraunces(
+                                              color: const Color(0xFF00FE06),
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Divider(color: Colors.white.withValues(alpha: 0.07), height: 1),
+                                    Column(
+                                      children: [
+                                        Text(
+                                          "Avg Expense",
+                                          style: GoogleFonts.fraunces(color: Colors.white.withValues(alpha: 0.4), fontSize: 11),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            "${currency.symbol}${_avgExpense.formatIndianCurrency()}",
+                                            style: GoogleFonts.fraunces(
+                                              color: const Color(0xFFFE0000),
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),

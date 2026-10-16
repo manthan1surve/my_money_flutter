@@ -35,35 +35,35 @@ class AppSpacing {
 }
 
 class AppTypography {
-  static TextStyle get screenTitle => GoogleFonts.castoro(
+  static final TextStyle screenTitle = GoogleFonts.castoro(
         fontSize: 28,
         height: 34 / 28,
         fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
       );
 
-  static TextStyle get cardTitle => GoogleFonts.fraunces(
+  static final TextStyle cardTitle = GoogleFonts.fraunces(
         fontSize: 22,
         height: 28 / 22,
         fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
       );
 
-  static TextStyle get sectionTitle => GoogleFonts.castoro(
+  static final TextStyle sectionTitle = GoogleFonts.castoro(
         fontSize: 18,
         height: 24 / 18,
         fontWeight: FontWeight.w600,
         color: AppColors.textPrimary,
       );
 
-  static TextStyle get body => GoogleFonts.castoro(
+  static final TextStyle body = GoogleFonts.castoro(
         fontSize: 15,
         height: 22 / 15,
         fontWeight: FontWeight.w500,
         color: AppColors.textSecondary,
       );
 
-  static TextStyle get label => GoogleFonts.castoro(
+  static final TextStyle label = GoogleFonts.castoro(
         fontSize: 13,
         height: 18 / 13,
         fontWeight: FontWeight.w600,

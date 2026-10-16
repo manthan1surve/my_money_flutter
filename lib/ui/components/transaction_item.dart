@@ -12,20 +12,33 @@ import 'transaction_details_dialog.dart';
 class TransactionItem extends BaseListItemWidget {
   final TransactionModel transaction;
   final CategoryModel? category;
+  final Account? account;
+  final Account? toAccount;
+  final String? currencySymbol;
+
+  static final TextStyle _frauncesStyle = GoogleFonts.fraunces();
 
   const TransactionItem({
     super.key,
     required this.transaction,
     this.category,
+    this.account,
+    this.toAccount,
+    this.currencySymbol,
   });
 
   void _showDetails(BuildContext context) {
     HapticFeedback.lightImpact();
-    final provider = Provider.of<AppProvider>(context, listen: false);
-    Account? account;
-    try {
-      account = provider.accounts.firstWhere((a) => a.id == transaction.accountId);
-    } catch (_) {}
+    Account? resolvedAccount = account;
+    if (resolvedAccount == null) {
+      final provider = Provider.of<AppProvider>(context, listen: false);
+      for (final a in provider.accounts) {
+        if (a.id == transaction.accountId) {
+          resolvedAccount = a;
+          break;
+        }
+      }
+    }
 
     final outerContext = context;
     Navigator.of(context).push(
@@ -39,7 +52,7 @@ class TransactionItem extends BaseListItemWidget {
           transaction: transaction,
           parentContext: outerContext,
           category: category,
-          account: account,
+          account: resolvedAccount,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -82,21 +95,27 @@ class TransactionItem extends BaseListItemWidget {
 
   @override
   Widget? buildSubtitle(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context, listen: false);
     final isTransfer = transaction.type == 'transfer';
-    Account? account;
-    Account? toAccount;
-    try {
-      account = provider.accounts.firstWhere((a) => a.id == transaction.accountId);
-      if (isTransfer && transaction.toAccountId.isNotEmpty) {
-        toAccount = provider.accounts.firstWhere((a) => a.id == transaction.toAccountId);
+    Account? srcAccount = account;
+    Account? dstAccount = toAccount;
+
+    // Fallback if not passed directly from parent list
+    if (srcAccount == null || (isTransfer && dstAccount == null && transaction.toAccountId.isNotEmpty)) {
+      final provider = Provider.of<AppProvider>(context, listen: false);
+      for (final a in provider.accounts) {
+        if (srcAccount == null && a.id == transaction.accountId) {
+          srcAccount = a;
+        }
+        if (isTransfer && dstAccount == null && a.id == transaction.toAccountId) {
+          dstAccount = a;
+        }
       }
-    } catch (_) {}
+    }
 
     return Text(
       isTransfer
-          ? '${account?.name ?? 'Unknown'} → ${toAccount?.name ?? 'Unknown'}'
-          : (account?.name ?? 'Unknown Account'),
+          ? '${srcAccount?.name ?? 'Unknown'} → ${dstAccount?.name ?? 'Unknown'}'
+          : (srcAccount?.name ?? 'Unknown Account'),
       style: TextStyle(
         color: Colors.white.withValues(alpha: 0.5),
         fontSize: 12,
@@ -107,15 +126,14 @@ class TransactionItem extends BaseListItemWidget {
 
   @override
   Widget? buildTrailing(BuildContext context) {
-    final provider = Provider.of<AppProvider>(context, listen: false);
-    final currency = provider.currency;
     final isIncome = transaction.type == 'income';
     final isTransfer = transaction.type == 'transfer';
+    final symbol = currencySymbol ?? Provider.of<AppProvider>(context, listen: false).currency.symbol;
 
     return Text(
       isTransfer
-          ? "${currency.symbol}${transaction.amount.formatIndianCurrency()}"
-          : "${isIncome ? '+' : '-'}${currency.symbol}${transaction.amount.formatIndianCurrency()}",
+          ? "$symbol${transaction.amount.formatIndianCurrency()}"
+          : "${isIncome ? '+' : '-'}$symbol${transaction.amount.formatIndianCurrency()}",
       style: TextStyle(
         fontSize: 16,
         fontWeight: FontWeight.bold,
@@ -139,7 +157,7 @@ class TransactionItem extends BaseListItemWidget {
           decoration: buildDecoration(context),
           padding: const EdgeInsets.all(15),
           child: DefaultTextStyle.merge(
-            style: GoogleFonts.fraunces(),
+            style: _frauncesStyle,
             child: Row(
               children: [
                 buildLeading(context),

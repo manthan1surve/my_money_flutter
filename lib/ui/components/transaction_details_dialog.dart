@@ -98,7 +98,7 @@ class TransactionDetailsDialog extends BaseModalDialog {
       } catch (_) {}
     }
 
-    final amountColor = isTransfer ? Colors.white : (isExpense ? const Color(0xFFFF8A65) : const Color(0xFF81C784));
+    final amountColor = isTransfer ? Colors.white : (isExpense ? const Color(0xFFFE0000) : const Color(0xFF00FE06));
     final dateStr = DateFormat('MMM dd, yyyy h:mm a').format(DateTime.fromMillisecondsSinceEpoch(transaction.date));
 
     return Column(
@@ -113,7 +113,7 @@ class TransactionDetailsDialog extends BaseModalDialog {
           style: TextStyle(
             color: amountColor,
             fontSize: 28,
-            fontWeight: FontWeight.w400,
+            fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 8),
@@ -226,7 +226,7 @@ class _DeleteConfirmationModal extends BaseModalDialog {
       const SizedBox(width: 16),
       ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red,
+          backgroundColor: const Color(0xFFFE0000),
           foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

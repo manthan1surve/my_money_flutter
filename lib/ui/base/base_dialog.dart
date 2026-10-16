@@ -8,6 +8,8 @@ abstract class BaseModalDialog extends StatelessWidget {
   final double borderRadius;
   final EdgeInsetsGeometry padding;
   final bool isCentered;
+  final bool scrollableContent;
+  final double blurSigma;
 
   const BaseModalDialog({
     super.key,
@@ -15,6 +17,8 @@ abstract class BaseModalDialog extends StatelessWidget {
     this.borderRadius = 28.0,
     this.padding = const EdgeInsets.all(24.0),
     this.isCentered = true,
+    this.scrollableContent = true,
+    this.blurSigma = 12.0,
   });
 
   /// Abstract Method: Subclasses implement this to render specific modal content.
@@ -78,61 +82,77 @@ abstract class BaseModalDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final actions = buildDialogActions(context);
 
+    Widget dialogBody = Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414).withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+        children: [
+          buildDialogHeader(context),
+          Builder(
+            builder: (context) {
+              final content = buildDialogContent(context);
+              if (content is SizedBox && (content.width == 0 || content.width == null) && (content.height == 0 || content.height == null)) {
+                return const SizedBox.shrink();
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 14),
+                  if (scrollableContent)
+                    SingleChildScrollView(child: content)
+                  else
+                    content,
+                ],
+              );
+            },
+          ),
+          if (actions != null && actions.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            Row(
+              mainAxisAlignment: isCentered ? MainAxisAlignment.center : MainAxisAlignment.end,
+              children: actions,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (blurSigma > 0) {
+      dialogBody = BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: dialogBody,
+      );
+    }
+
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              color: const Color(0xFF121212).withValues(alpha: 0.88),
-              borderRadius: BorderRadius.circular(borderRadius),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.1),
-                width: 1.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  blurRadius: 30,
-                  spreadRadius: 5,
-                ),
-              ],
+      elevation: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(borderRadius),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 28,
+              spreadRadius: 2,
+              offset: const Offset(0, 8),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-              children: [
-                buildDialogHeader(context),
-                Builder(
-                  builder: (context) {
-                    final content = buildDialogContent(context);
-                    if (content is SizedBox && (content.width == 0 || content.width == null) && (content.height == 0 || content.height == null)) {
-                      return const SizedBox.shrink();
-                    }
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 14),
-                        SingleChildScrollView(child: content),
-                      ],
-                    );
-                  },
-                ),
-                if (actions != null && actions.isNotEmpty) ...[
-                  const SizedBox(height: 28),
-                  Row(
-                    mainAxisAlignment: isCentered ? MainAxisAlignment.center : MainAxisAlignment.end,
-                    children: actions,
-                  ),
-                ],
-              ],
-            ),
-          ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(borderRadius),
+          child: dialogBody,
         ),
       ),
     );
@@ -152,6 +172,10 @@ class GlassModalDialog extends BaseModalDialog {
     this.actions,
     this.titleIcon,
     super.isCentered = false,
+    super.borderRadius = 28.0,
+    super.padding = const EdgeInsets.all(24.0),
+    super.scrollableContent = true,
+    super.blurSigma = 12.0,
   });
 
   @override
@@ -169,25 +193,25 @@ Future<T?> showSmoothModalDialog<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool barrierDismissible = true,
-  Duration duration = const Duration(milliseconds: 320),
+  Duration duration = const Duration(milliseconds: 240),
 }) {
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: Colors.black.withValues(alpha: 0.6),
+    barrierColor: Colors.black.withValues(alpha: 0.65),
     transitionDuration: duration,
     pageBuilder: (context, animation, secondaryAnimation) => builder(context),
     transitionBuilder: (context, animation, secondaryAnimation, child) {
       final curve = CurvedAnimation(
         parent: animation,
         curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
+        reverseCurve: Curves.easeOutCubic,
       );
       return FadeTransition(
         opacity: curve,
         child: ScaleTransition(
-          scale: Tween<double>(begin: 0.88, end: 1.0).animate(curve),
+          scale: Tween<double>(begin: 0.93, end: 1.0).animate(curve),
           child: child,
         ),
       );

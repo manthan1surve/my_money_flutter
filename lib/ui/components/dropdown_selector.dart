@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../base/base_dialog.dart';
@@ -29,17 +30,26 @@ class DropdownSelector<T> extends StatefulWidget {
 }
 
 class _DropdownSelectorState<T> extends State<DropdownSelector<T>> {
-  void _showModal() {
+  bool _isOpen = false;
+
+  Future<void> _showModal() async {
     HapticFeedback.lightImpact();
-    showSmoothModalDialog(
+    setState(() => _isOpen = true);
+
+    final selected = await showSmoothModalDialog<T>(
       context: context,
-      builder: (context) {
+      duration: const Duration(milliseconds: 240),
+      builder: (dialogCtx) {
         return GlassModalDialog(
           title: widget.label ?? 'SELECT',
+          scrollableContent: false,
+          blurSigma: 12.0,
           content: _DropdownModalContent<T>(
             items: widget.items,
             selectedItem: widget.selectedItem,
-            onSelect: widget.onSelect,
+            onSelect: (item) {
+              Navigator.of(dialogCtx).pop(item);
+            },
             getName: widget.getName,
             getId: widget.getId,
             getIcon: widget.getIcon,
@@ -47,6 +57,13 @@ class _DropdownSelectorState<T> extends State<DropdownSelector<T>> {
         );
       },
     );
+
+    if (mounted) {
+      setState(() => _isOpen = false);
+      if (selected != null) {
+        widget.onSelect(selected);
+      }
+    }
   }
 
   @override
@@ -74,43 +91,61 @@ class _DropdownSelectorState<T> extends State<DropdownSelector<T>> {
             ),
           GestureDetector(
             onTap: _showModal,
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(
+                  color: _isOpen
+                      ? Colors.white.withValues(alpha: 0.28)
+                      : Colors.white.withValues(alpha: 0.08),
+                  width: _isOpen ? 1.2 : 1.0,
+                ),
               ),
-
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      if (icon != null && icon.isNotEmpty) ...[
-                        Text(
-                          icon,
-                          style: const TextStyle(fontSize: 16),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (icon != null && icon.isNotEmpty) ...[
+                          Text(
+                            icon,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Text(
+                            selectedItem != null
+                                ? widget.getName(selectedItem)
+                                : widget.placeholder,
+                            style: TextStyle(
+                              color: selectedItem != null
+                                  ? Colors.white
+                                  : Colors.white.withValues(alpha: 0.3),
+                              fontSize: 15,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const SizedBox(width: 8),
                       ],
-                      Text(
-                        selectedItem != null
-                            ? widget.getName(selectedItem)
-                            : widget.placeholder,
-                        style: TextStyle(
-                          color: selectedItem != null
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.3),
-                          fontSize: 15,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  Icon(
-                    Icons.keyboard_arrow_down,
-                    color: Colors.white.withValues(alpha: 0.4),
-                    size: 16,
+                  AnimatedRotation(
+                    turns: _isOpen ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeInOut,
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      color: _isOpen
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.4),
+                      size: 18,
+                    ),
                   ),
                 ],
               ),
@@ -144,19 +179,24 @@ class _DropdownModalContent<T> extends StatefulWidget {
 }
 
 class _DropdownModalContentState<T> extends State<_DropdownModalContent<T>> {
+  static const double _itemHeight = 52.0;
   late final ScrollController _scrollController;
+  String? _tempSelectedId;
 
   @override
   void initState() {
     super.initState();
+    if (widget.selectedItem != null) {
+      _tempSelectedId = widget.getId(widget.selectedItem as T);
+    }
+
     double initialOffset = 0.0;
     if (widget.selectedItem != null) {
       final selectedIndex = widget.items.indexWhere(
         (item) => widget.getId(item) == widget.getId(widget.selectedItem as T),
       );
-      if (selectedIndex > 2) {
-        // Approximate item height + margin is ~54px
-        initialOffset = (selectedIndex - 1) * 54.0;
+      if (selectedIndex > 1) {
+        initialOffset = (selectedIndex - 1) * _itemHeight;
       }
     }
     _scrollController = ScrollController(initialScrollOffset: initialOffset);
@@ -170,88 +210,124 @@ class _DropdownModalContentState<T> extends State<_DropdownModalContent<T>> {
 
   @override
   Widget build(BuildContext context) {
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.48;
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final maxHeight = screenHeight * 0.48;
+    final totalHeight = widget.items.length * _itemHeight;
+    final contentHeight = totalHeight.clamp(_itemHeight, maxHeight);
+    final isScrollable = totalHeight > maxHeight;
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: maxHeight,
-      ),
-      child: RawScrollbar(
-        controller: _scrollController,
-        thumbColor: Colors.white.withValues(alpha: 0.25),
-        radius: const Radius.circular(8),
-        thickness: 4,
-        thumbVisibility: widget.items.length > 5,
-        child: ListView.builder(
+    return SizedBox(
+      height: contentHeight,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.trackpad,
+            PointerDeviceKind.stylus,
+          },
+          scrollbars: false,
+        ),
+        child: RawScrollbar(
           controller: _scrollController,
-          shrinkWrap: true,
-          physics: const BouncingScrollPhysics(),
-          padding: EdgeInsets.zero,
-          itemCount: widget.items.length,
-          itemBuilder: (context, index) {
-            final item = widget.items[index];
-            final isSelected = widget.selectedItem != null &&
-                widget.getId(item) == widget.getId(widget.selectedItem as T);
-            final icon = widget.getIcon?.call(item);
+          thumbColor: Colors.white.withValues(alpha: 0.28),
+          radius: const Radius.circular(8),
+          thickness: 4,
+          thumbVisibility: isScrollable,
+          child: ListView.builder(
+            controller: _scrollController,
+            itemExtent: _itemHeight,
+            itemCount: widget.items.length,
+            shrinkWrap: false,
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            padding: EdgeInsets.zero,
+            itemBuilder: (context, index) {
+              final item = widget.items[index];
+              final itemId = widget.getId(item);
+              final isSelected = _tempSelectedId != null
+                  ? _tempSelectedId == itemId
+                  : (widget.selectedItem != null && widget.getId(widget.selectedItem as T) == itemId);
+              final icon = widget.getIcon?.call(item);
 
-            return GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                widget.onSelect(item);
-                Navigator.pop(context);
-              },
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.transparent,
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                child: Material(
+                  color: Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          if (icon != null && icon.isNotEmpty) ...[
-                            Text(
-                              icon,
-                              style: const TextStyle(fontSize: 18),
-                            ),
-                            const SizedBox(width: 12),
-                          ],
-                          Flexible(
-                            child: Text(
-                              widget.getName(item),
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Colors.white
-                                    : Colors.white.withValues(alpha: 0.7),
-                                fontSize: 16,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  child: InkWell(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _tempSelectedId = itemId);
+                      widget.onSelect(item);
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    splashColor: Colors.white.withValues(alpha: 0.12),
+                    highlightColor: Colors.white.withValues(alpha: 0.06),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(12),
+                        border: isSelected
+                            ? Border.all(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                width: 1,
+                              )
+                            : Border.all(
+                                color: Colors.transparent,
+                                width: 1,
                               ),
-                              overflow: TextOverflow.ellipsis,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                if (icon != null && icon.isNotEmpty) ...[
+                                  Text(
+                                    icon,
+                                    style: const TextStyle(fontSize: 18),
+                                  ),
+                                  const SizedBox(width: 12),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    widget.getName(item),
+                                    style: TextStyle(
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.white.withValues(alpha: 0.72),
+                                      fontSize: 15,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
+                          if (isSelected)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: Icon(
+                                Icons.check_circle,
+                                color: Colors.white,
+                                size: 19,
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                    if (isSelected)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8),
-                        child: Icon(
-                          Icons.check_circle,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
