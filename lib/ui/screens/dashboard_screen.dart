@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
@@ -49,6 +50,7 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
   String _cachedSearchQuery = '';
   Map<String, CategoryModel> _cachedCategoryMap = const {};
   Map<String, Account> _cachedAccountMap = const {};
+  Map<int, List<TransactionModel>> _monthBuckets = const {};
   final Map<int, List<dynamic>> _monthGroupedCache = {};
 
   @override
@@ -61,7 +63,13 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
   void initState() {
     super.initState();
     _searchAnimController = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
-    _searchAnim = Tween<double>(begin: 0, end: 1).animate(_searchAnimController);
+    _searchAnim = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(
+        parent: _searchAnimController,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      ),
+    );
     _pageController = PageController(initialPage: _initialIndex);
 
     _generateMonths();
@@ -171,17 +179,40 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
     String searchQuery,
     List<TransactionModel> allTransactions,
     List<CategoryModel> categories,
+    List<Account> accounts,
   ) {
     final isStale = !identical(_cachedAllTransactionsRef, allTransactions) ||
         !identical(_cachedCategoriesRef, categories) ||
+        !identical(_cachedAccountsRef, accounts) ||
         _cachedSearchQuery != searchQuery;
 
     if (isStale) {
       _cachedAllTransactionsRef = allTransactions;
       _cachedCategoriesRef = categories;
+      _cachedAccountsRef = accounts;
       _cachedSearchQuery = searchQuery;
       _cachedCategoryMap = {for (var c in categories) c.id: c};
+      _cachedAccountMap = {for (var a in accounts) a.id: a};
       _monthGroupedCache.clear();
+
+      // Pre-bucket transactions once across all months in a single O(N) pass
+      final hasSearch = searchQuery.isNotEmpty;
+      final q = hasSearch ? searchQuery.toLowerCase() : '';
+      final Map<int, List<TransactionModel>> buckets = {};
+
+      for (final t in allTransactions) {
+        if (hasSearch) {
+          final cat = _cachedCategoryMap[t.categoryId];
+          final noteMatch = t.note.toLowerCase().contains(q);
+          final catMatch = cat != null && cat.name.toLowerCase().contains(q);
+          if (!noteMatch && !catMatch) continue;
+        }
+
+        final d = DateTime.fromMillisecondsSinceEpoch(t.date);
+        final key = d.year * 100 + d.month;
+        (buckets[key] ??= []).add(t);
+      }
+      _monthBuckets = buckets;
     }
 
     final int monthKey = monthDate.year * 100 + monthDate.month;
@@ -190,36 +221,17 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
       return cached;
     }
 
-    final startMs = DateTime(monthDate.year, monthDate.month, 1).millisecondsSinceEpoch;
-    final endMs = DateTime(monthDate.year, monthDate.month + 1, 1).millisecondsSinceEpoch;
-    final hasSearch = searchQuery.isNotEmpty;
-    final q = hasSearch ? searchQuery.toLowerCase() : '';
-
-    final List<TransactionModel> currentMonthTransactions = [];
-    for (final t in allTransactions) {
-      if (t.date >= startMs && t.date < endMs) {
-        if (!hasSearch) {
-          currentMonthTransactions.add(t);
-        } else {
-          final cat = _cachedCategoryMap[t.categoryId];
-          final noteMatch = t.note.toLowerCase().contains(q);
-          final catMatch = cat != null && cat.name.toLowerCase().contains(q);
-          if (noteMatch || catMatch) {
-            currentMonthTransactions.add(t);
-          }
-        }
-      }
-    }
-
-    if (currentMonthTransactions.isEmpty) {
+    final monthTxns = _monthBuckets[monthKey];
+    if (monthTxns == null || monthTxns.isEmpty) {
       _monthGroupedCache[monthKey] = const [];
       return const [];
     }
 
-    currentMonthTransactions.sort((a, b) => b.date.compareTo(a.date));
+    // Sort only this month's bucket (typically 10-50 txns, extremely fast)
+    monthTxns.sort((a, b) => b.date.compareTo(a.date));
 
     final Map<String, List<TransactionModel>> grouped = {};
-    for (final t in currentMonthTransactions) {
+    for (final t in monthTxns) {
       final dateObj = DateTime.fromMillisecondsSinceEpoch(t.date);
       final dateString = _formatDayHeader(dateObj);
       (grouped[dateString] ??= []).add(t);
@@ -300,7 +312,7 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
                                 color: Colors.white.withValues(alpha: _isSearchActive ? 0.3 : 0.0),
                                 width: 1.5,
                               ),
-                              color: _isSearchActive ? const Color(0xFF121212).withValues(alpha: 0.90) : Colors.transparent,
+                              color: _isSearchActive ? const Color(0xFF0C1214).withValues(alpha: 0.65) : Colors.transparent,
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(22),
@@ -356,6 +368,7 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
                             },
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeOutCubic,
                               padding: const EdgeInsets.all(2.0),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
@@ -415,9 +428,9 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
           height: 90,
           margin: const EdgeInsets.only(left: 20, right: 20, top: 0, bottom: 5),
           decoration: BoxDecoration(
-            color: const Color(0xFF121212).withValues(alpha: 0.85),
+            color: const Color(0xFF0C1214).withValues(alpha: 0.58),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
           ),
           child: NotificationListener<ScrollNotification>(
             onNotification: (notification) {
@@ -489,9 +502,10 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
                         const SizedBox(height: 2),
                         Text(
                           item.year.toString(),
-                          style: TextStyle(
+                          style: GoogleFonts.inter(
                             color: isActive ? Colors.white.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.15),
                             fontSize: isActive ? 11 : 9,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
@@ -516,7 +530,13 @@ class _DashboardScreenState extends BaseScreenState<DashboardScreen> with Single
             },
             itemBuilder: (context, index) {
               final monthDate = _months[index];
-              final monthTransactions = _getGroupedTransactionsForMonth(monthDate, _searchQuery, transactions, categories);
+              final monthTransactions = _getGroupedTransactionsForMonth(
+                monthDate,
+                _searchQuery,
+                transactions,
+                categories,
+                accounts,
+              );
 
               return MonthTransactionsView(
                 transactions: monthTransactions,
@@ -547,6 +567,11 @@ class MonthTransactionsView extends StatelessWidget {
   });
 
   static final _defaultCategory = CategoryModel(id: '', name: '', icon: '', type: '');
+  static final _headerStyle = GoogleFonts.fraunces(
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -560,15 +585,32 @@ class MonthTransactionsView extends StatelessWidget {
     }
 
     return ListView.builder(
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      physics: const ClampingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20).copyWith(bottom: 110),
+      // ignore: deprecated_member_use
+      cacheExtent: 800.0,
+      addRepaintBoundaries: true,
       itemCount: transactions.length,
+      findChildIndexCallback: (Key key) {
+        if (key is ValueKey<String>) {
+          final val = key.value;
+          final isHeader = val.startsWith('header_');
+          final searchTarget = isHeader ? val.substring(7) : val;
+          final idx = transactions.indexWhere((element) {
+            if (isHeader) return element is String && element == searchTarget;
+            return element is TransactionModel && element.id == searchTarget;
+          });
+          return idx >= 0 ? idx : null;
+        }
+        return null;
+      },
       itemBuilder: (context, index) {
         final item = transactions[index];
         if (item is String) {
           return Padding(
+            key: ValueKey('header_$item'),
             padding: const EdgeInsets.only(top: 20, bottom: 5),
-            child: Text(item, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            child: Text(item, style: _headerStyle),
           );
         } else if (item is TransactionModel) {
           final cat = categoryMap[item.categoryId] ?? _defaultCategory;
@@ -577,6 +619,7 @@ class MonthTransactionsView extends StatelessWidget {
               ? accountMap[item.toAccountId]
               : null;
           return TransactionItem(
+            key: ValueKey(item.id),
             transaction: item,
             category: cat,
             account: acc,

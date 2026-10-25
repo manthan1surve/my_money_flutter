@@ -3,11 +3,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
 import '../../models/models.dart';
 import '../../core/currency_format.dart';
+import '../../core/theme.dart';
 import '../../services/financial_ai_assistant.dart';
 import 'loading_spinner.dart';
 import 'transaction_details_dialog.dart';
+
+class _AiQueryComputeInput {
+  final String query;
+  final List<TransactionModel> transactions;
+  final List<CategoryModel> categories;
+  final CurrencyModel currency;
+
+  const _AiQueryComputeInput({
+    required this.query,
+    required this.transactions,
+    required this.categories,
+    required this.currency,
+  });
+}
+
+AiQueryResult _processAiQueryInBackground(_AiQueryComputeInput input) {
+  return FinancialAiAssistant.processQuery(
+    query: input.query,
+    transactions: input.transactions,
+    categories: input.categories,
+    currency: input.currency,
+  );
+}
 
 /// "Ask Your Money" AI-powered financial assistant component embedded in the Analytics page.
 class AskYourMoneySection extends StatefulWidget {
@@ -34,6 +59,7 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
   bool _isLoading = false;
   AiQueryResult? _currentResult;
   String? _activeChip;
+  int _activeQuerySeq = 0;
 
   @override
   void dispose() {
@@ -42,7 +68,7 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
     super.dispose();
   }
 
-  void _runQuery(String queryText) {
+  void _runQuery(String queryText) async {
     final text = queryText.trim();
     if (text.isEmpty) return;
 
@@ -55,22 +81,33 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
       _queryController.text = text;
     });
 
-    // Provide a brief micro-delay for smooth AI thinking indicator
-    Future.delayed(const Duration(milliseconds: 220), () {
-      if (!mounted) return;
+    _activeQuerySeq++;
+    final currentSeq = _activeQuerySeq;
 
-      final result = FinancialAiAssistant.processQuery(
+    try {
+      final input = _AiQueryComputeInput(
         query: text,
         transactions: widget.transactions,
         categories: widget.categories,
         currency: widget.currency,
       );
 
-      setState(() {
-        _currentResult = result;
-        _isLoading = false;
-      });
-    });
+      final result = await compute(_processAiQueryInBackground, input);
+
+      if (mounted && _activeQuerySeq == currentSeq) {
+        setState(() {
+          _currentResult = result;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted && _activeQuerySeq == currentSeq) {
+        setState(() {
+          _currentResult = AiQueryResult.error(query: text, message: e.toString());
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   void _clearQuery() {
@@ -120,13 +157,16 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                        child: Container(color: Colors.transparent),
+                      child: RepaintBoundary(
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                          child: Container(color: Colors.transparent),
+                        ),
                       ),
                     ),
-                    Container(
-                      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
+                    RepaintBoundary(
+                      child: Container(
+                        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.05),
@@ -275,7 +315,7 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                                                 const SizedBox(width: 8),
                                                 Text(
                                                   "$sign${widget.currency.symbol}${t.amount.formatIndianCurrency()}",
-                                                  style: GoogleFonts.fraunces(color: amountColor, fontSize: 16, fontWeight: FontWeight.bold),
+                                                  style: GoogleFonts.inter(color: amountColor, fontSize: 16, fontWeight: FontWeight.w600),
                                                 ),
                                               ],
                                             ),
@@ -291,15 +331,16 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        );
-      },
-    );
-  }
+            ),
+          );
+        },
+      );
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -307,9 +348,9 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
       margin: const EdgeInsets.only(bottom: 20),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF121212).withValues(alpha: 0.85),
+        color: const Color(0xFF0C1214).withValues(alpha: 0.62),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 1.5),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,7 +616,7 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
 
     return Container(
       margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(20),
@@ -600,12 +641,12 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 4),
                     Text(
                       result.periodLabel,
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 12,
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -643,21 +684,21 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
           const SizedBox(height: 16),
 
           // Primary Hero Metric
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 6,
             children: [
               Text(
                 result.heroValue,
-                style: GoogleFonts.fraunces(
+                style: GoogleFonts.inter(
                   color: result.heroColor,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w600,
                   letterSpacing: 0.4,
                 ),
               ),
-              if (result.isPrediction) ...[
-                const SizedBox(width: 8),
+              if (result.isPrediction)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
@@ -675,12 +716,29 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                     ),
                   ),
                 ),
-              ],
+              if (result.isMonthlyHistorical)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.3)),
+                  ),
+                  child: const Text(
+                    "HISTORICAL",
+                    style: TextStyle(
+                      color: Color(0xFF6366F1),
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
             ],
           ),
 
           if (result.heroSubtitle != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               result.heroSubtitle!,
               style: TextStyle(
@@ -694,10 +752,10 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
           if (result.categoryBreakdown.isNotEmpty) ...[
             const SizedBox(height: 18),
             Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             ...result.categoryBreakdown.take(4).map((item) {
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 14),
                 child: Column(
                   children: [
                     Row(
@@ -714,20 +772,33 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                         ),
                         Text(
                           "${widget.currency.symbol}${item.amount.formatIndianCurrency()}",
-                          style: TextStyle(color: item.color, fontSize: 13, fontWeight: FontWeight.bold),
+                          style: GoogleFonts.inter(color: item.color, fontSize: 13, fontWeight: FontWeight.w600),
                         ),
-                        const SizedBox(width: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Text(
+                            "|",
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
                         Text(
                           "${item.percentage.toStringAsFixed(1)}%",
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                          style: GoogleFonts.inter(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(6),
                       child: Container(
-                        height: 5,
+                        height: 6,
                         width: double.infinity,
                         color: Colors.white.withValues(alpha: 0.08),
                         alignment: Alignment.centerLeft,
@@ -735,8 +806,8 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
                           widthFactor: (item.percentage / 100).clamp(0.0, 1.0),
                           child: Container(
                             decoration: BoxDecoration(
-                              color: item.color,
-                              borderRadius: BorderRadius.circular(3),
+                              color: item.color.withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                           ),
                         ),
@@ -748,29 +819,139 @@ class _AskYourMoneySectionState extends State<AskYourMoneySection> {
             }),
           ],
 
-          // Insights Bullet List
-          if (result.insights.isNotEmpty) ...[
-            const SizedBox(height: 10),
+          // Monthly Historical Series Bars (same pattern as categoryBreakdown)
+          if (result.monthlySeries.isNotEmpty) ...[
+            const SizedBox(height: 18),
             Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
+            ...result.monthlySeries.map((item) {
+              final barColor = result.isSavingsResult
+                  ? (item.amount >= 0 ? const Color(0xFF00FE06) : const Color(0xFFFE0000))
+                  : result.heroColor;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const SizedBox(width: 0),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Text(
+                                item.monthLabel,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (item.isCurrentMonth) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFF9800).withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: const Color(0xFFFF9800).withValues(alpha: 0.4)),
+                                  ),
+                                  child: const Text(
+                                    'IN PROGRESS',
+                                    style: TextStyle(
+                                      color: Color(0xFFFF9800),
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '${item.amount < 0 ? '-' : ''}${widget.currency.symbol}${item.amount.abs().formatIndianCurrency()}',
+                          style: GoogleFonts.inter(
+                              color: barColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Text(
+                            "|",
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${item.percentage.toStringAsFixed(0)}%',
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.55),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        height: 6,
+                        width: double.infinity,
+                        color: Colors.white.withValues(alpha: 0.08),
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: (item.percentage / 100).clamp(0.0, 1.0),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: barColor.withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+          if (result.insights.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+            const SizedBox(height: 14),
+            Text(
+              "KEY INSIGHTS",
+              style: AppTypography.label,
+            ),
+            const SizedBox(height: 10),
             ...result.insights.map((note) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.only(bottom: 10),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
                         width: 5,
                         height: 5,
-                        margin: const EdgeInsets.only(top: 6, right: 8),
+                        margin: const EdgeInsets.only(top: 7, right: 10),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.4),
+                          color: Colors.white.withValues(alpha: 0.55),
                           shape: BoxShape.circle,
                         ),
                       ),
                       Expanded(
                         child: Text(
                           note,
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12, height: 1.3),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.56),
+                            fontSize: 13,
+                            height: 1.5,
+                          ),
                         ),
                       ),
                     ],

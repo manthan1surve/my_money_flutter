@@ -93,7 +93,7 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
         onSurface: Colors.white,
       ),
       dialogTheme: const DialogThemeData(backgroundColor: Color(0x661A1A1A)),
-      textTheme: GoogleFonts.castoroTextTheme(ThemeData.dark().textTheme),
+      textTheme: GoogleFonts.frauncesTextTheme(ThemeData.dark().textTheme),
     );
   }
 
@@ -260,9 +260,9 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
                       valueListenable: _hasAmountNotifier,
                       builder: (context, hasAmount, _) => Text(
                         currencySymbol,
-                        style: TextStyle(
+                        style: GoogleFonts.inter(
                           fontSize: 48,
-                          fontWeight: FontWeight.w300,
+                          fontWeight: FontWeight.w600,
                           color: hasAmount
                               ? Colors.white
                               : Colors.white.withValues(alpha: 0.3),
@@ -277,15 +277,18 @@ class _AddTransactionFormState extends State<AddTransactionForm> {
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           inputFormatters: [IndianCurrencyFormatter()],
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: GoogleFonts.inter(
                             fontSize: 48,
-                            fontWeight: FontWeight.w300,
+                            fontWeight: FontWeight.w600,
                             color: Colors.white,
                           ),
                           decoration: InputDecoration(
                             hintText: '0',
-                            hintStyle: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.3)),
+                            hintStyle: GoogleFonts.inter(
+                              fontSize: 48,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.3),
+                            ),
                             border: InputBorder.none,
                             isDense: true,
                             contentPadding:

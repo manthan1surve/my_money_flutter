@@ -119,6 +119,7 @@ class _AccountsScreenState extends BaseScreenState<AccountsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SolidCardWidget(
+            borderRadius: 23.0,
             margin: const EdgeInsets.only(bottom: 30),
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -172,24 +173,27 @@ class _AccountsScreenState extends BaseScreenState<AccountsScreen> {
                 final account = accounts[index];
                 final isNegative = account.balance < 0;
                 final formattedBalance = '${isNegative ? '-' : ''}${currency.symbol}${account.balance.abs().formatIndianCurrency()}';
-                return _AccountItemWidget(
+                return RepaintBoundary(
                   key: ValueKey(account.id),
-                  account: account,
-                  balance: formattedBalance,
-                  isNegative: isNegative,
-                  index: index,
-                  onEdit: () => _showEditAccountDialog(account, context.read<AppProvider>()),
-                  onDelete: () {
-                    try {
-                      context.read<AppProvider>().deleteAccount(account.id);
-                      showSuccessNotification(
-                        context,
-                        'Account "${account.name}" Deleted',
-                      );
-                    } catch (e) {
-                      _showError(e.toString());
-                    }
-                  },
+                  child: _AccountItemWidget(
+                    key: ValueKey('acc_widget_${account.id}'),
+                    account: account,
+                    balance: formattedBalance,
+                    isNegative: isNegative,
+                    index: index,
+                    onEdit: () => _showEditAccountDialog(account, context.read<AppProvider>()),
+                    onDelete: () {
+                      try {
+                        context.read<AppProvider>().deleteAccount(account.id);
+                        showSuccessNotification(
+                          context,
+                          'Account "${account.name}" Deleted',
+                        );
+                      } catch (e) {
+                        _showError(e.toString());
+                      }
+                    },
+                  ),
                 );
               },
             ),
@@ -202,7 +206,7 @@ class _AccountsScreenState extends BaseScreenState<AccountsScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12.0),
+        borderRadius: BorderRadius.circular(14.0),
         border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: TextField(
@@ -304,6 +308,21 @@ class _AccountItemWidget extends StatefulWidget {
 }
 
 class _AccountItemWidgetState extends State<_AccountItemWidget> {
+  static final TextStyle _nameStyle = GoogleFonts.fraunces(
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: FontWeight.bold,
+  );
+  static final TextStyle _balanceStyle = GoogleFonts.inter(
+    color: Colors.black,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+  );
+  static final TextStyle _removeStyle = GoogleFonts.fraunces(
+    color: Colors.white,
+    fontWeight: FontWeight.bold,
+  );
+
   bool _isDeleteRevealed = false;
   bool _isDismissing = false;
 
@@ -350,7 +369,7 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     alignment: Alignment.centerRight,
-                    child: Text('Remove', style: GoogleFonts.fraunces(color: Colors.white, fontWeight: FontWeight.bold)),
+                    child: Text('Remove', style: _removeStyle),
                   ),
                 ),
               ),
@@ -368,9 +387,9 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                     curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.all(16.0),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF121212).withValues(alpha: 0.88),
+                      color: const Color(0xFF0C1214).withValues(alpha: 0.60),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
                       boxShadow: _isDeleteRevealed
                           ? [
                               BoxShadow(
@@ -395,7 +414,7 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                         Expanded(
                           child: Text(
                             widget.account.name,
-                            style: GoogleFonts.fraunces(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            style: _nameStyle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -414,11 +433,7 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                                 ),
                                 child: Text(
                                   widget.balance,
-                                  style: GoogleFonts.fraunces(
-                                    color: Colors.black,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: _balanceStyle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -431,9 +446,14 @@ class _AccountItemWidgetState extends State<_AccountItemWidget> {
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
                                 onTap: widget.onEdit,
-                                child: const Padding(
+                                child: Padding(
                                   padding: EdgeInsets.all(8.0),
-                                  child: Icon(Icons.edit_outlined, color: Colors.white70, size: 20),
+                                  child: Image.asset(
+                                    'assets/edit.png',
+                                    color: Colors.white70,
+                                    width: 18,
+                                    height: 18,
+                                  ),
                                 ),
                               ),
                             ),

@@ -36,22 +36,25 @@ class _LoadingSpinnerState extends State<LoadingSpinner> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          return Transform.rotate(
-            angle: _controller.value * 2.0 * math.pi,
-            child: SizedBox(
-              width: widget.size,
-              height: widget.size,
-              child: CustomPaint(
-                painter: _SpinnerPainter(
-                  strokeWidth: widget.strokeWidth,
-                ),
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _controller,
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: CustomPaint(
+              painter: _SpinnerPainter(
+                strokeWidth: widget.strokeWidth,
               ),
             ),
-          );
-        },
+          ),
+          builder: (context, child) {
+            return Transform.rotate(
+              angle: _controller.value * 2.0 * math.pi,
+              child: child,
+            );
+          },
+        ),
       ),
     );
   }

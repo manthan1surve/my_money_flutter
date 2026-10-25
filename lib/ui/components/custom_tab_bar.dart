@@ -30,10 +30,11 @@ class CustomTabBar extends StatelessWidget {
     return Positioned(
       bottom: bottomPadding > 0 ? bottomPadding + 10 : 48,
       left: (screenWidth - barWidth) / 2,
-      child: SizedBox(
-        width: barWidth,
-        height: 72,
-        child: Stack(
+      child: RepaintBoundary(
+        child: SizedBox(
+          width: barWidth,
+          height: 72,
+          child: Stack(
           children: [
             // Background Layer
             Container(
@@ -132,8 +133,9 @@ class CustomTabBar extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildTabItem(int index, String label, String assetName) {
     final isFocused = currentIndex == index;

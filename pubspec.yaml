@@ -78,9 +78,9 @@ flutter:
     - assets/accounts.png
     - assets/analytics.png
     - assets/catgorgy.png
-    - assets/adaptive-icon.png
-    - assets/icon.png
-    - assets/splash-icon.png
+    - assets/dark_teal_bg.jpg
+    - assets/edit.png
+    - assets/delete.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

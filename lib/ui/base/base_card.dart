@@ -112,7 +112,7 @@ class GlassCardWidget extends BaseCardWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white.withValues(alpha: 0.16),
+            Colors.white.withValues(alpha: 0.10),
             Colors.white.withValues(alpha: 0.06),
           ],
           stops: const [0.0, 1.0],
@@ -133,7 +133,7 @@ class GlassCardWidget extends BaseCardWidget {
               width: borderWidth,
             ),
           ),
-          child: cardChild,
+          child: RepaintBoundary(child: cardChild),
         ),
       ),
     );
@@ -154,7 +154,7 @@ class SolidCardWidget extends BaseCardWidget {
     super.width = double.infinity,
     super.height = double.nan,
     super.onTap,
-    this.backgroundColor = const Color(0xFF121212),
+    this.backgroundColor = const Color(0xFF0C1214),
     this.border,
   });
 
@@ -163,9 +163,9 @@ class SolidCardWidget extends BaseCardWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: backgroundColor.withValues(alpha: 0.85),
+        color: backgroundColor.withValues(alpha: 0.62),
         borderRadius: BorderRadius.circular(borderRadius),
-        border: border ?? Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: border ?? Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: cardChild,
     );

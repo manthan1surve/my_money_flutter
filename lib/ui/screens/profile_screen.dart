@@ -7,7 +7,6 @@ import '../../providers/app_provider.dart';
 import '../base/base_screen.dart';
 import '../base/base_card.dart';
 import '../base/base_dialog.dart';
-import '../components/glass_card.dart';
 import '../components/dropdown_selector.dart';
 import '../components/loading_spinner.dart';
 import '../components/validation_dialog.dart';
@@ -140,7 +139,12 @@ class _ProfileScreenState extends BaseScreenState<ProfileScreen> {
                     color: Color(0xFF6366F1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.edit, size: 12, color: Colors.white),
+                  child: Image.asset(
+                    'assets/edit.png',
+                    color: Colors.white,
+                    width: 12,
+                    height: 12,
+                  ),
                 ),
               ],
             ),
@@ -157,7 +161,12 @@ class _ProfileScreenState extends BaseScreenState<ProfileScreen> {
               GestureDetector(
                 onTap: () => _showEditNameDialog(
                     context, context.read<AppProvider>(), user?.name ?? user?.email.split('@').first ?? 'User'),
-                child: const Icon(Icons.edit, color: Colors.white70, size: 18),
+                child: Image.asset(
+                  'assets/edit.png',
+                  color: Colors.white70,
+                  width: 16,
+                  height: 16,
+                ),
               ),
             ],
           ),
@@ -616,7 +625,7 @@ class _ImportProgressDialogState extends State<ImportProgressDialog> {
           return Center(
             child: Material(
               color: Colors.transparent,
-              child: GlassCard(
+              child: GlassCardWidget(
                 margin: const EdgeInsets.symmetric(horizontal: 40),
                 padding: const EdgeInsets.all(24),
                 child: Column(

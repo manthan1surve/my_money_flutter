@@ -3,9 +3,194 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-
-class ConcentricRingsPainter extends CustomPainter {
+import '../../core/currency_format.dart';
+class AnimatedConcentricRingsChart extends StatefulWidget {
   final List<Map<String, dynamic>> rings;
+  final double size;
+  final int? selectedIndex;
+  final ValueChanged<int?>? onRingTap;
+  final bool isActive;
+
+  const AnimatedConcentricRingsChart({
+    super.key,
+    required this.rings,
+    this.size = 140.0,
+    this.selectedIndex,
+    this.onRingTap,
+    this.isActive = true,
+  });
+
+  @override
+  State<AnimatedConcentricRingsChart> createState() => _AnimatedConcentricRingsChartState();
+}
+
+class _AnimatedConcentricRingsChartState extends State<AnimatedConcentricRingsChart>
+    with TickerProviderStateMixin {
+  late AnimationController _sweepController;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
+
+  late AnimationController _selectionController;
+  int? _activeSelectedIndex;
+  int? _prevSelectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeSelectedIndex = widget.selectedIndex;
+    _prevSelectedIndex = widget.selectedIndex;
+
+    _sweepController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1050),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _sweepController,
+        curve: const Interval(0.0, 0.25, curve: Curves.easeOut),
+      ),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.92, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _sweepController,
+        curve: const Interval(0.0, 0.70, curve: Curves.easeOutCubic),
+      ),
+    );
+
+    _selectionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      value: widget.selectedIndex != null ? 1.0 : 0.0,
+    );
+
+    if (widget.isActive) {
+      _sweepController.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedConcentricRingsChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.selectedIndex != oldWidget.selectedIndex) {
+      _prevSelectedIndex = _activeSelectedIndex;
+      _activeSelectedIndex = widget.selectedIndex;
+      _selectionController.forward(from: 0.0);
+    }
+
+    if (!oldWidget.isActive && widget.isActive) {
+      _sweepController.forward(from: 0.0);
+      return;
+    } else if (oldWidget.isActive && !widget.isActive) {
+      _sweepController.reset();
+      return;
+    }
+
+    bool ringsChanged = oldWidget.rings.length != widget.rings.length;
+    if (!ringsChanged) {
+      for (int i = 0; i < widget.rings.length; i++) {
+        if (widget.rings[i]['id'] != oldWidget.rings[i]['id'] ||
+            widget.rings[i]['percentage'] != oldWidget.rings[i]['percentage'] ||
+            widget.rings[i]['color'] != oldWidget.rings[i]['color']) {
+          ringsChanged = true;
+          break;
+        }
+      }
+    }
+
+    if (ringsChanged) {
+      _sweepController.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _sweepController.dispose();
+    _selectionController.dispose();
+    super.dispose();
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    if (widget.rings.isEmpty) return;
+    final double center = widget.size / 2;
+    final dx = details.localPosition.dx - center;
+    final dy = details.localPosition.dy - center;
+    final double distance = sqrt(dx * dx + dy * dy);
+
+    const double maxStroke = 10.0;
+    const double gapRatio = 0.5;
+    final int count = widget.rings.length;
+    final double divisor = (count + (count - 1) * gapRatio);
+    final double requiredStroke = divisor > 0 ? (center - 10) / divisor : maxStroke;
+    final double strokeWidth = min(maxStroke, requiredStroke);
+    final double gap = strokeWidth * gapRatio;
+
+    int tappedIndex = -1;
+    for (int i = 0; i < widget.rings.length; i++) {
+      final double radius = center - 5 - (strokeWidth / 2) - (i * (strokeWidth + gap));
+      if (radius <= 0) break;
+      if ((distance - radius).abs() <= strokeWidth * 0.95) {
+        tappedIndex = i;
+        break;
+      }
+    }
+
+    setState(() {
+      _prevSelectedIndex = _activeSelectedIndex;
+      if (tappedIndex != -1) {
+        _activeSelectedIndex = (_activeSelectedIndex == tappedIndex) ? null : tappedIndex;
+      } else {
+        _activeSelectedIndex = null;
+      }
+    });
+    _selectionController.forward(from: 0.0);
+    widget.onRingTap?.call(_activeSelectedIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: _handleTapUp,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_sweepController, _selectionController]),
+        builder: (context, child) {
+          return FadeTransition(
+            opacity: _fadeAnimation,
+            child: ScaleTransition(
+              scale: _scaleAnimation,
+              child: SizedBox(
+                width: widget.size,
+                height: widget.size,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: Size(widget.size, widget.size),
+                    painter: AnimatedConcentricRingsPainter(
+                      rings: widget.rings,
+                      progress: _sweepController.value,
+                      selectedIndex: _activeSelectedIndex,
+                      prevSelectedIndex: _prevSelectedIndex,
+                      selectionProgress: _selectionController.value,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class AnimatedConcentricRingsPainter extends CustomPainter {
+  final List<Map<String, dynamic>> rings;
+  final double progress;
+  final int? selectedIndex;
+  final int? prevSelectedIndex;
+  final double selectionProgress;
 
   static final Paint _bgPaint = Paint()..style = PaintingStyle.stroke;
   static final Paint _glowPaint = Paint()
@@ -16,62 +201,539 @@ class ConcentricRingsPainter extends CustomPainter {
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.round;
 
-  ConcentricRingsPainter({
+  AnimatedConcentricRingsPainter({
     required this.rings,
+    required this.progress,
+    this.selectedIndex,
+    this.prevSelectedIndex,
+    this.selectionProgress = 1.0,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (rings.isEmpty) return;
     final double center = size.width / 2;
-    
-    double maxStroke = 10.0;
-    double gapRatio = 0.5;
-    int count = rings.length;
-    // ensure we don't divide by zero
-    double divisor = (count + (count - 1) * gapRatio);
-    double requiredStroke = divisor > 0 ? (center - 10) / divisor : maxStroke;
-    double strokeWidth = min(maxStroke, requiredStroke);
-    double gap = strokeWidth * gapRatio;
+    final Offset centerOffset = Offset(center, center);
 
-    _bgPaint
-      ..color = Colors.white.withValues(alpha: 0.05)
-      ..strokeWidth = strokeWidth;
-    _glowPaint.strokeWidth = strokeWidth;
-    _solidPaint.strokeWidth = strokeWidth;
+    const double maxStroke = 10.0;
+    const double gapRatio = 0.5;
+    final int count = rings.length;
+    final double divisor = (count + (count - 1) * gapRatio);
+    final double requiredStroke = divisor > 0 ? (center - 10) / divisor : maxStroke;
+    final double strokeWidth = min(maxStroke, requiredStroke);
+    final double gap = strokeWidth * gapRatio;
+
+    // Smooth selection interpolation
+    final bool hasSelection = selectedIndex != null;
+    final double selectFactor = Curves.easeInOutCubic.transform(selectionProgress.clamp(0.0, 1.0));
 
     for (int i = 0; i < rings.length; i++) {
       final ring = rings[i];
       final double radius = center - 5 - (strokeWidth / 2) - (i * (strokeWidth + gap));
       if (radius <= 0) break;
-      final Rect rect = Rect.fromCircle(center: Offset(center, center), radius: radius);
-      final double percentage = ring['percentage'] / 100.0;
-      final double sweepAngle = min(percentage * 360, 360) * pi / 180;
-      
-      final Color color = ring['color'];
+      final Rect rect = Rect.fromCircle(center: centerOffset, radius: radius);
 
-      canvas.drawCircle(Offset(center, center), radius, _bgPaint);
+      // Compute smoothly interpolated highlight
+      final bool isCurrentSelected = selectedIndex == i;
+      final bool wasPrevSelected = prevSelectedIndex == i;
+      double highlightWeight;
+      if (isCurrentSelected && wasPrevSelected) {
+        highlightWeight = 1.0;
+      } else if (isCurrentSelected) {
+        highlightWeight = selectFactor;
+      } else if (wasPrevSelected) {
+        highlightWeight = 1.0 - selectFactor;
+      } else {
+        highlightWeight = 0.0;
+      }
 
-      _glowPaint.color = color.withValues(alpha: 0.6);
+      final double currentStroke = strokeWidth + (highlightWeight * 2.0);
+
+      // Background track
+      final double bgAlpha = hasSelection
+          ? ui.lerpDouble(0.05, 0.02, selectFactor)!
+          : 0.05;
+      _bgPaint
+        ..color = Colors.white.withValues(alpha: bgAlpha)
+        ..strokeWidth = strokeWidth;
+
+      canvas.drawCircle(centerOffset, radius, _bgPaint);
+
+      if (progress <= 0) continue;
+
+      final double percentage = ((ring['percentage'] as num?)?.toDouble() ?? 0.0) / 100.0;
+      final double targetSweepAngle = min(percentage * 360, 360) * pi / 180;
+      if (targetSweepAngle <= 0) continue;
+
+      // Ultra-smooth cascading ease-in-out curve
+      final double delay = count > 1 ? (i / (count - 1)) * 0.28 : 0.0;
+      const double ringDuration = 0.72;
+      final double localProgress = ((progress - delay) / ringDuration).clamp(0.0, 1.0);
+      final double ringEase = Curves.easeInOutCubic.transform(localProgress);
+      final double sweepAngle = targetSweepAngle * ringEase;
+
+      if (sweepAngle <= 0.001) continue;
+
+      // Smooth fade-in during the initial ~50ms of each ring's movement to prevent cap pop
+      final double startFeather = (localProgress / 0.08).clamp(0.0, 1.0);
+
+      final Color baseColor = ring['color'] as Color? ?? Colors.white;
+      final double targetDim = hasSelection ? 0.35 : 1.0;
+      final double colorDim = ui.lerpDouble(1.0, isCurrentSelected ? 1.0 : targetDim, selectFactor)!;
+      final double finalAlpha = (colorDim * startFeather).clamp(0.0, 1.0);
+
+      final Color color = baseColor.withValues(alpha: finalAlpha);
+
+      final double glowAlpha = ui.lerpDouble(0.6, 0.85, highlightWeight)! * startFeather;
+      _glowPaint
+        ..strokeWidth = currentStroke
+        ..color = baseColor.withValues(alpha: glowAlpha);
       canvas.drawArc(rect, -pi / 2, sweepAngle, false, _glowPaint);
 
-      _solidPaint.color = color;
+      _solidPaint
+        ..strokeWidth = currentStroke
+        ..color = color;
       canvas.drawArc(rect, -pi / 2, sweepAngle, false, _solidPaint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant ConcentricRingsPainter oldDelegate) {
-    if (rings.length != oldDelegate.rings.length) return true;
+  bool shouldRepaint(covariant AnimatedConcentricRingsPainter oldDelegate) {
+    if (progress != oldDelegate.progress ||
+        selectedIndex != oldDelegate.selectedIndex ||
+        prevSelectedIndex != oldDelegate.prevSelectedIndex ||
+        selectionProgress != oldDelegate.selectionProgress ||
+        rings.length != oldDelegate.rings.length) {
+      return true;
+    }
     for (int i = 0; i < rings.length; i++) {
       if (rings[i]['id'] != oldDelegate.rings[i]['id'] ||
-          rings[i]['amount'] != oldDelegate.rings[i]['amount'] ||
           rings[i]['percentage'] != oldDelegate.rings[i]['percentage'] ||
           rings[i]['color'] != oldDelegate.rings[i]['color']) {
         return true;
       }
     }
     return false;
+  }
+}
+
+class AnimatedPieChart extends StatefulWidget {
+  final List<Map<String, dynamic>> data;
+  final double totalAmount;
+  final String currencySymbol;
+  final String analysisType;
+  final double size;
+  final int? selectedIndex;
+  final ValueChanged<int?>? onSliceTap;
+
+  const AnimatedPieChart({
+    super.key,
+    required this.data,
+    required this.totalAmount,
+    required this.currencySymbol,
+    this.analysisType = 'expense',
+    this.size = 160.0,
+    this.selectedIndex,
+    this.onSliceTap,
+  });
+
+  @override
+  State<AnimatedPieChart> createState() => _AnimatedPieChartState();
+}
+
+class _AnimatedPieChartState extends State<AnimatedPieChart>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _sweepAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _fadeAnimation;
+  int? _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.selectedIndex;
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+
+    _sweepAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+    _scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.0, 0.45, curve: Curves.easeIn),
+      ),
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedPieChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedIndex != oldWidget.selectedIndex) {
+      _selectedIndex = widget.selectedIndex;
+    }
+
+    bool shouldReplay = oldWidget.analysisType != widget.analysisType ||
+        oldWidget.totalAmount != widget.totalAmount ||
+        oldWidget.data.length != widget.data.length;
+
+    if (!shouldReplay && oldWidget.data.length == widget.data.length) {
+      for (int i = 0; i < widget.data.length; i++) {
+        if (widget.data[i]['id'] != oldWidget.data[i]['id'] ||
+            widget.data[i]['amount'] != oldWidget.data[i]['amount']) {
+          shouldReplay = true;
+          break;
+        }
+      }
+    }
+
+    if (shouldReplay) {
+      _controller.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleTapUp(TapUpDetails details) {
+    final double halfSize = widget.size / 2;
+    final Offset center = Offset(halfSize, halfSize);
+    final dx = details.localPosition.dx - center.dx;
+    final dy = details.localPosition.dy - center.dy;
+    final distance = sqrt(dx * dx + dy * dy);
+
+    const double strokeWidth = 20.0;
+    final double radius = halfSize - 10.0;
+    final double midRadius = radius - strokeWidth / 2;
+    final double innerRadius = midRadius - strokeWidth / 2 - 6;
+    final double outerRadius = midRadius + strokeWidth / 2 + 10;
+
+    if (distance < innerRadius) {
+      // Tap center hole -> deselect
+      if (_selectedIndex != null) {
+        setState(() => _selectedIndex = null);
+        widget.onSliceTap?.call(null);
+      }
+      return;
+    }
+
+    if (distance >= innerRadius && distance <= outerRadius && widget.data.isNotEmpty) {
+      // Tap ring -> find slice
+      double touchAngle = atan2(dy, dx);
+      double normalizedAngle = touchAngle - (-pi / 2);
+      if (normalizedAngle < 0) normalizedAngle += 2 * pi;
+
+      double totalPercentage = 0.0;
+      for (final d in widget.data) {
+        totalPercentage += (d['percentage'] as num?)?.toDouble() ?? 0.0;
+      }
+      if (totalPercentage <= 0) totalPercentage = 100.0;
+
+      double accumulated = 0.0;
+      int tappedIndex = -1;
+      for (int i = 0; i < widget.data.length; i++) {
+        final frac = ((widget.data[i]['percentage'] as num?)?.toDouble() ?? 0.0) / totalPercentage;
+        final sweep = frac * 2 * pi;
+        if (normalizedAngle >= accumulated && normalizedAngle < accumulated + sweep) {
+          tappedIndex = i;
+          break;
+        }
+        accumulated += sweep;
+      }
+
+      if (tappedIndex != -1) {
+        setState(() {
+          if (_selectedIndex == tappedIndex) {
+            _selectedIndex = null;
+          } else {
+            _selectedIndex = tappedIndex;
+          }
+        });
+        widget.onSliceTap?.call(_selectedIndex);
+      }
+    }
+  }
+
+  Widget _buildCenterContent() {
+    if (_selectedIndex != null && _selectedIndex! < widget.data.length) {
+      final item = widget.data[_selectedIndex!];
+      final icon = item['icon'] as String? ?? '📊';
+      final name = item['name'] as String? ?? '';
+      final amount = (item['amount'] as num?)?.toDouble() ?? 0.0;
+      final percentage = (item['percentage'] as num?)?.toDouble() ?? 0.0;
+      final color = item['color'] as Color? ?? Colors.white;
+
+      return Column(
+        key: ValueKey('slice_center_$_selectedIndex'),
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            icon,
+            style: const TextStyle(fontSize: 18),
+          ),
+          const SizedBox(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            "${percentage.toStringAsFixed(1)}%",
+            style: GoogleFonts.inter(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                "${widget.currencySymbol}${amount.formatIndianCurrency()}",
+                style: GoogleFonts.inter(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final isExpense = widget.analysisType == 'expense';
+    final typeLabel = isExpense ? "EXPENSE" : "INCOME";
+    final typeColor = isExpense ? const Color(0xFFFE0000) : const Color(0xFF00FE06);
+
+    return Column(
+      key: const ValueKey('total_center_display'),
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          typeLabel,
+          style: TextStyle(
+            color: typeColor,
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Text(
+              "${widget.currencySymbol}${widget.totalAmount.formatIndianCurrency()}",
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          "${widget.data.length} ${widget.data.length == 1 ? 'Category' : 'Categories'}",
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: 9,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: _handleTapUp,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return ScaleTransition(
+            scale: _scaleAnimation,
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: SizedBox(
+                width: widget.size,
+                height: widget.size,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        size: Size(widget.size, widget.size),
+                        painter: _PieChartPainter(
+                          data: widget.data,
+                          progress: _sweepAnimation.value,
+                          selectedIndex: _selectedIndex,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: widget.size * 0.62,
+                      height: widget.size * 0.62,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: Tween<double>(begin: 0.92, end: 1.0).animate(animation),
+                            child: child,
+                          ),
+                        ),
+                        child: _buildCenterContent(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PieChartPainter extends CustomPainter {
+  final List<Map<String, dynamic>> data;
+  final double progress;
+  final int? selectedIndex;
+
+  _PieChartPainter({
+    required this.data,
+    required this.progress,
+    this.selectedIndex,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double centerVal = size.width / 2;
+    final Offset center = Offset(centerVal, centerVal);
+    const double strokeWidth = 20.0;
+    final double radius = centerVal - 10.0;
+    final double midRadius = radius - strokeWidth / 2;
+
+    // 1. Draw subtle background track
+    final bgPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = Colors.white.withValues(alpha: 0.06);
+    canvas.drawCircle(center, midRadius, bgPaint);
+
+    if (data.isEmpty || progress <= 0) return;
+
+    double totalPercentage = 0.0;
+    for (final d in data) {
+      totalPercentage += (d['percentage'] as num?)?.toDouble() ?? 0.0;
+    }
+    if (totalPercentage <= 0) totalPercentage = 100.0;
+
+    const double gapAngle = 0.045; // ~2.5 degrees gap between slices
+    final double maxSweep = 2 * pi * progress;
+    double currentStart = -pi / 2;
+
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      final frac = ((item['percentage'] as num?)?.toDouble() ?? 0.0) / totalPercentage;
+      final sliceFullSweep = 2 * pi * frac;
+      final isSelected = selectedIndex == i;
+      final hasSelection = selectedIndex != null;
+
+      if (currentStart >= -pi / 2 + maxSweep) {
+        break;
+      }
+
+      final availableSweep = (-pi / 2 + maxSweep) - currentStart;
+      final actualSweep = min(sliceFullSweep, availableSweep);
+
+      if (actualSweep > 0) {
+        final double drawStart;
+        final double drawSweep;
+
+        if (data.length > 1) {
+          final effectiveGap = min(gapAngle, sliceFullSweep * 0.35);
+          if (actualSweep > effectiveGap) {
+            drawStart = currentStart + (effectiveGap / 2);
+            drawSweep = actualSweep - effectiveGap;
+          } else {
+            drawStart = currentStart;
+            drawSweep = actualSweep;
+          }
+        } else {
+          drawStart = currentStart;
+          drawSweep = actualSweep;
+        }
+
+        final double sliceStroke = isSelected ? strokeWidth + 4.0 : strokeWidth;
+        final double sliceRadius = midRadius + (isSelected ? 2.0 : 0.0);
+        final Rect sliceRect = Rect.fromCircle(center: center, radius: sliceRadius);
+
+        Color sliceColor = item['color'] as Color? ?? Colors.white;
+        if (hasSelection && !isSelected) {
+          sliceColor = sliceColor.withValues(alpha: 0.35);
+        }
+
+        // Draw ambient glow
+        final glowPaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = sliceStroke
+          ..strokeCap = StrokeCap.butt
+          ..color = sliceColor.withValues(alpha: isSelected ? 0.5 : 0.25)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+        canvas.drawArc(sliceRect, drawStart, drawSweep, false, glowPaint);
+
+        // Draw solid sector
+        final solidPaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = sliceStroke
+          ..strokeCap = StrokeCap.butt
+          ..color = sliceColor;
+        canvas.drawArc(sliceRect, drawStart, drawSweep, false, solidPaint);
+      }
+
+      currentStart += sliceFullSweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PieChartPainter oldDelegate) {
+    return progress != oldDelegate.progress ||
+        selectedIndex != oldDelegate.selectedIndex ||
+        data != oldDelegate.data;
   }
 }
 
@@ -307,10 +969,10 @@ class _CustomLineChartState extends State<CustomLineChart> {
                                     const SizedBox(height: 2),
                                     Text(
                                       '${widget.currencySymbol}$formattedAmount',
-                                      style: GoogleFonts.fraunces(
+                                      style: GoogleFonts.inter(
                                         color: Colors.white,
                                         fontSize: 12,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                       textAlign: TextAlign.center,
                                       softWrap: false,
@@ -714,7 +1376,7 @@ class _CustomGroupedBarChartState extends State<CustomGroupedBarChart> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.end,
-                children: ticks.map((t) => Text(_formatY(t), style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12))).toList(),
+                children: ticks.map((t) => Text(_formatY(t), style: GoogleFonts.inter(color: Colors.white.withValues(alpha: 0.4), fontSize: 12, fontWeight: FontWeight.w600))).toList(),
               ),
             ),
 
@@ -862,14 +1524,14 @@ class _CustomGroupedBarChartState extends State<CustomGroupedBarChart> {
                               const SizedBox(width: 4),
                               Text(
                                 "${widget.currencySymbol}${widget.data[_selectedIndex!]['income'].round()}",
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                style: GoogleFonts.inter(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(width: 12),
                               Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFFFE0000), borderRadius: BorderRadius.circular(3))),
                               const SizedBox(width: 4),
                               Text(
                                 "${widget.currencySymbol}${widget.data[_selectedIndex!]['expense'].round()}",
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                style: GoogleFonts.inter(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
                               ),
                             ],
                           ),
@@ -923,10 +1585,10 @@ class _BreathingTextState extends State<BreathingText> with SingleTickerProvider
       builder: (context, child) {
         return Text(
           widget.text,
-          style: TextStyle(
+          style: GoogleFonts.inter(
             color: widget.color,
             fontSize: widget.fontSize,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
             shadows: [
               BoxShadow(
                 color: widget.color.withValues(alpha: _animation.value * 0.8),

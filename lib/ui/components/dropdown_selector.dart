@@ -183,6 +183,25 @@ class _DropdownModalContentState<T> extends State<_DropdownModalContent<T>> {
   late final ScrollController _scrollController;
   String? _tempSelectedId;
 
+  // Cached decorations to avoid memory allocations and GC pressure during 60/120fps scrolling
+  static final BoxDecoration _selectedDecoration = BoxDecoration(
+    color: Colors.white.withValues(alpha: 0.08),
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(
+      color: Colors.white.withValues(alpha: 0.16),
+      width: 1,
+    ),
+  );
+
+  static final BoxDecoration _unselectedDecoration = BoxDecoration(
+    color: Colors.transparent,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(
+      color: Colors.transparent,
+      width: 1,
+    ),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -216,117 +235,123 @@ class _DropdownModalContentState<T> extends State<_DropdownModalContent<T>> {
     final contentHeight = totalHeight.clamp(_itemHeight, maxHeight);
     final isScrollable = totalHeight > maxHeight;
 
-    return SizedBox(
-      height: contentHeight,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(
-          dragDevices: {
-            PointerDeviceKind.touch,
-            PointerDeviceKind.mouse,
-            PointerDeviceKind.trackpad,
-            PointerDeviceKind.stylus,
-          },
-          scrollbars: false,
-        ),
-        child: RawScrollbar(
-          controller: _scrollController,
-          thumbColor: Colors.white.withValues(alpha: 0.28),
-          radius: const Radius.circular(8),
-          thickness: 4,
-          thumbVisibility: isScrollable,
-          child: ListView.builder(
+    // RepaintBoundary isolates the scrolling list onto its own GPU layer,
+    // preventing the parent GlassModalDialog's 12px BackdropFilter from
+    // re-filtering the background on every single scroll frame.
+    return RepaintBoundary(
+      child: SizedBox(
+        height: contentHeight,
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.trackpad,
+              PointerDeviceKind.stylus,
+            },
+            scrollbars: false,
+          ),
+          child: RawScrollbar(
             controller: _scrollController,
-            itemExtent: _itemHeight,
-            itemCount: widget.items.length,
-            shrinkWrap: false,
-            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: EdgeInsets.zero,
-            itemBuilder: (context, index) {
-              final item = widget.items[index];
-              final itemId = widget.getId(item);
-              final isSelected = _tempSelectedId != null
-                  ? _tempSelectedId == itemId
-                  : (widget.selectedItem != null && widget.getId(widget.selectedItem as T) == itemId);
-              final icon = widget.getIcon?.call(item);
+            thumbColor: Colors.white.withValues(alpha: 0.28),
+            radius: const Radius.circular(8),
+            thickness: 4,
+            interactive: true,
+            thumbVisibility: isScrollable,
+            child: ListView.builder(
+              controller: _scrollController,
+              itemExtent: _itemHeight,
+              itemCount: widget.items.length,
+              shrinkWrap: false,
+              // ClampingScrollPhysics provides instantaneous 1:1 tracking without sticky rubber-band resistance
+              physics: const ClampingScrollPhysics(),
+              padding: EdgeInsets.zero,
+              findChildIndexCallback: (Key key) {
+                if (key is ValueKey<String>) {
+                  final index = widget.items.indexWhere(
+                    (item) => widget.getId(item) == key.value,
+                  );
+                  return index >= 0 ? index : null;
+                }
+                return null;
+              },
+              itemBuilder: (context, index) {
+                final item = widget.items[index];
+                final itemId = widget.getId(item);
+                final isSelected = _tempSelectedId != null
+                    ? _tempSelectedId == itemId
+                    : (widget.selectedItem != null &&
+                        widget.getId(widget.selectedItem as T) == itemId);
+                final icon = widget.getIcon?.call(item);
 
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2.0),
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _tempSelectedId = itemId);
-                      widget.onSelect(item);
-                    },
+                return Padding(
+                  key: ValueKey<String>(itemId),
+                  padding: const EdgeInsets.symmetric(vertical: 2.0),
+                  child: Material(
+                    color: Colors.transparent,
                     borderRadius: BorderRadius.circular(12),
-                    splashColor: Colors.white.withValues(alpha: 0.12),
-                    highlightColor: Colors.white.withValues(alpha: 0.06),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        border: isSelected
-                            ? Border.all(
-                                color: Colors.white.withValues(alpha: 0.16),
-                                width: 1,
-                              )
-                            : Border.all(
-                                color: Colors.transparent,
-                                width: 1,
-                              ),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Row(
-                              children: [
-                                if (icon != null && icon.isNotEmpty) ...[
-                                  Text(
-                                    icon,
-                                    style: const TextStyle(fontSize: 18),
-                                  ),
-                                  const SizedBox(width: 12),
-                                ],
-                                Expanded(
-                                  child: Text(
-                                    widget.getName(item),
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.white
-                                          : Colors.white.withValues(alpha: 0.72),
-                                      fontSize: 15,
-                                      fontWeight: isSelected
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _tempSelectedId = itemId);
+                        widget.onSelect(item);
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      splashColor: Colors.white.withValues(alpha: 0.12),
+                      highlightColor: Colors.white.withValues(alpha: 0.06),
+                      child: Ink(
+                        decoration: isSelected
+                            ? _selectedDecoration
+                            : _unselectedDecoration,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  if (icon != null && icon.isNotEmpty) ...[
+                                    Text(
+                                      icon,
+                                      style: const TextStyle(fontSize: 18),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
+                                    const SizedBox(width: 12),
+                                  ],
+                                  Expanded(
+                                    child: Text(
+                                      widget.getName(item),
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : Colors.white.withValues(alpha: 0.72),
+                                        fontSize: 15,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (isSelected)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 8),
-                              child: Icon(
-                                Icons.check_circle,
-                                color: Colors.white,
-                                size: 19,
+                                ],
                               ),
                             ),
-                        ],
+                            if (isSelected)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(
+                                  Icons.check_circle,
+                                  color: Colors.white,
+                                  size: 19,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ),

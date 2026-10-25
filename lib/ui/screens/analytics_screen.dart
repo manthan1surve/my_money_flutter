@@ -45,6 +45,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
   bool _isCalculatingTrend = false;
   Timer? _computeDebounceTimer;
   bool _justBecameActive = false;
+  int _activationCounter = 0;
 
   @override
   void initState() {
@@ -57,6 +58,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
     if (!oldWidget.isActive && widget.isActive) {
       _justBecameActive = true;
       _computeDebounceTimer?.cancel();
+      setState(() {
+        _activationCounter++;
+        _selectedCategoryIndex = null;
+      });
     } else if (oldWidget.isActive && !widget.isActive) {
       _computeDebounceTimer?.cancel();
     }
@@ -72,6 +77,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
   void _toggleAnalysisType() {
     setState(() {
       _analysisType = _analysisType == 'expense' ? 'income' : 'expense';
+      _selectedCategoryIndex = null;
     });
   }
 
@@ -100,6 +106,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
   double _mExpense = 0;
   double _mIncome = 0;
   List<Map<String, dynamic>> _chartData = [];
+  int? _selectedCategoryIndex;
   List<Map<String, dynamic>> _trendGraph = [];
   int? _trendDefaultIndex;
   final ValueNotifier<Map<String, dynamic>?> _activeTrendNotifier = ValueNotifier(null);
@@ -185,6 +192,9 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
           _mExpense = result.mExpense;
           _mIncome = result.mIncome;
           _chartData = result.chartData;
+          if (_selectedCategoryIndex != null && _selectedCategoryIndex! >= _chartData.length) {
+            _selectedCategoryIndex = null;
+          }
           _trendGraph = result.trendGraph;
           _maxTrendAmount = result.maxTrendAmount;
           _trendDefaultIndex = result.trendDefaultIndex;
@@ -335,7 +345,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                 children: [
                                   Text(
                                     dateKey,
-                                    style: GoogleFonts.fraunces(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                                    style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
                                   ),
                                   const SizedBox(height: 8),
                                   Container(height: 1, color: Colors.white.withValues(alpha: 0.2)),
@@ -383,7 +393,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                           const SizedBox(width: 8),
                                           Text(
                                             "$sign${currency.symbol}${t.amount.formatIndianCurrency()}",
-                                            style: GoogleFonts.fraunces(color: amountColor, fontSize: 16, fontWeight: FontWeight.bold),
+                                            style: GoogleFonts.inter(color: amountColor, fontSize: 16, fontWeight: FontWeight.w600),
                                           ),
                                         ],
                                       ),
@@ -537,10 +547,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                                 )
                                               : Text(
                                                   "${currency.symbol}${avgBalance.formatIndianCurrency()}",
-                                                  style: GoogleFonts.fraunces(
+                                                  style: GoogleFonts.inter(
                                                     color: Colors.white,
                                                     fontSize: 17,
-                                                    fontWeight: FontWeight.bold,
+                                                    fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
                                         ),
@@ -559,10 +569,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                           alignment: Alignment.center,
                                           child: Text(
                                             "${currency.symbol}${_avgIncome.formatIndianCurrency()}",
-                                            style: GoogleFonts.fraunces(
+                                            style: GoogleFonts.inter(
                                               color: const Color(0xFF00FE06),
                                               fontSize: 17,
-                                              fontWeight: FontWeight.bold,
+                                              fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ),
@@ -581,10 +591,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                           alignment: Alignment.center,
                                           child: Text(
                                             "${currency.symbol}${_avgExpense.formatIndianCurrency()}",
-                                            style: GoogleFonts.fraunces(
+                                            style: GoogleFonts.inter(
                                               color: const Color(0xFFFE0000),
                                               fontSize: 17,
-                                              fontWeight: FontWeight.bold,
+                                              fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ),
@@ -641,10 +651,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                               duration: const Duration(milliseconds: 300),
                                               curve: Curves.easeOutCubic,
                                               textAlign: TextAlign.center,
-                                              style: GoogleFonts.fraunces(
+                                              style: GoogleFonts.inter(
                                                 color: isSelected ? Colors.black : Colors.white,
                                                 fontSize: 14,
-                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                                               ),
                                               child: Text(options[i], textAlign: TextAlign.center),
                                             ),
@@ -695,6 +705,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                   children: [
                                     AnimatedContainer(
                                       duration: const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(12),
                                         color: _analysisType == 'expense' ? const Color(0xFFFE0000) : const Color(0xFF00FE06),
@@ -740,16 +751,17 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                 child: SizedBox(
                                   width: 140,
                                   height: 140,
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      RepaintBoundary(
-                                        child: CustomPaint(
-                                          size: const Size(140, 140),
-                                          painter: ConcentricRingsPainter(rings: _chartData.toList()),
-                                        ),
-                                      ),
-                                    ],
+                                  child: AnimatedConcentricRingsChart(
+                                    key: ValueKey('${_analysisType}_${currentDate.year}_${currentDate.month}_${_chartData.length}_$_activationCounter'),
+                                    rings: _chartData.toList(),
+                                    size: 140.0,
+                                    isActive: widget.isActive,
+                                    selectedIndex: _selectedCategoryIndex,
+                                    onRingTap: (idx) {
+                                      setState(() {
+                                        _selectedCategoryIndex = idx;
+                                      });
+                                    },
                                   ),
                                 ),
                               ),
@@ -767,10 +779,25 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                 final percentageText = "${percentage.toStringAsFixed(2)}%";
                                 
                                 return GestureDetector(
-                                  onTap: () => _showCategoryTransactions(item['id'] as String, name, color),
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedCategoryIndex = (_selectedCategoryIndex == index) ? null : index;
+                                    });
+                                    _showCategoryTransactions(item['id'] as String, name, color);
+                                  },
                                   behavior: HitTestBehavior.opaque,
-                                  child: Container(
-                                    color: Colors.transparent,
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: _selectedCategoryIndex == index
+                                          ? color.withValues(alpha: 0.12)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: _selectedCategoryIndex == index
+                                          ? Border.all(color: color.withValues(alpha: 0.45), width: 1)
+                                          : Border.all(color: Colors.transparent, width: 1),
+                                    ),
                                     child: Column(
                                       children: [
                                         Padding(
@@ -815,7 +842,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                                     const SizedBox(width: 8),
                                                     Text(
                                                       amountText,
-                                                      style: TextStyle(
+                                                      style: GoogleFonts.inter(
                                                         color: _analysisType == 'expense' 
                                                             ? const Color(0xFFFE0000) 
                                                             : const Color(0xFF00FE06),
@@ -841,7 +868,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                                   ),
                                                   alignment: Alignment.centerLeft,
                                                   child: TweenAnimationBuilder<double>(
-                                                    key: ValueKey('${item['id']}_${_analysisType}_${currentDate.millisecondsSinceEpoch}'),
+                                                    key: ValueKey('${item['id']}_${_analysisType}_${currentDate.millisecondsSinceEpoch}_$_activationCounter'),
                                                     tween: Tween<double>(begin: 0.0, end: (percentage / 100).clamp(0.0, 1.0)),
                                                     duration: const Duration(milliseconds: 800),
                                                     curve: Curves.easeOutCubic,
@@ -870,10 +897,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                               alignment: Alignment.centerRight,
                                               child: Text(
                                                 percentageText,
-                                                style: const TextStyle(
+                                                style: GoogleFonts.inter(
                                                   color: Colors.white,
                                                   fontSize: 13,
-                                                  fontWeight: FontWeight.bold,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ),
@@ -966,10 +993,10 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
                                     const SizedBox(height: 2),
                                     Text(
                                       '${currency.symbol}${periodTotal.formatIndianCurrency()}',
-                                      style: TextStyle(
+                                      style: GoogleFonts.inter(
                                         color: _analysisType == 'expense' ? const Color(0xFFFE0000) : const Color(0xFF00FE06),
                                         fontSize: 24,
-                                        fontWeight: FontWeight.bold,
+                                        fontWeight: FontWeight.w600,
                                         letterSpacing: 0.5,
                                       ),
                                     ),
@@ -1101,7 +1128,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
             alignment: Alignment.centerLeft, 
             child: isBreathing 
                 ? BreathingText(text: value, color: valueColor, fontSize: 18)
-                : Text(value, style: TextStyle(color: valueColor, fontSize: 18, fontWeight: FontWeight.bold))
+                : Text(value, style: GoogleFonts.inter(color: valueColor, fontSize: 18, fontWeight: FontWeight.w600))
           ),
         ],
       ),
@@ -1120,7 +1147,7 @@ class _AnalyticsScreenState extends BaseScreenState<AnalyticsScreen> {
         child: AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 400),
           curve: Curves.easeOutQuart,
-          style: GoogleFonts.fraunces(
+          style: GoogleFonts.inter(
             color: isActive ? Colors.black : Colors.white,
             fontSize: 12,
             fontWeight: FontWeight.w600,
@@ -1147,10 +1174,10 @@ class _SolidCard extends BaseCardWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xFF121212).withValues(alpha: 0.85),
+        color: const Color(0xFF0C1214).withValues(alpha: 0.62),
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
+          color: Colors.white.withValues(alpha: 0.12),
           width: 1.5,
         ),
       ),

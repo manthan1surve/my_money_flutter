@@ -95,6 +95,7 @@ class _CategoriesScreenState extends BaseScreenState<CategoriesScreen> {
         children: [
           // Add Category Form Card using SolidCardWidget
           SolidCardWidget(
+            borderRadius: 23.0,
             margin: const EdgeInsets.only(bottom: 30),
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -114,9 +115,9 @@ class _CategoriesScreenState extends BaseScreenState<CategoriesScreen> {
                     width: 220,
                     height: 50,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF161616).withValues(alpha: 0.85),
+                      color: const Color(0xFF0C1214).withValues(alpha: 0.60),
                       borderRadius: BorderRadius.circular(30),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
                     ),
                     child: Stack(
                       children: [
@@ -225,7 +226,7 @@ class _CategoriesScreenState extends BaseScreenState<CategoriesScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: TextField(
@@ -457,10 +458,10 @@ class _CategoryItemWidgetState extends State<_CategoryItemWidget> {
                 child: Container(
                   padding: const EdgeInsets.all(16.0),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF161616).withValues(alpha: 0.92),
+                    color: const Color(0xFF0C1214).withValues(alpha: 0.60),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
+                      color: Colors.white.withValues(alpha: 0.10),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -502,10 +503,11 @@ class _CategoryItemWidgetState extends State<_CategoryItemWidget> {
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.edit_outlined,
+                          child: Image.asset(
+                            'assets/edit.png',
                             color: Colors.white70,
-                            size: 18,
+                            width: 17,
+                            height: 17,
                           ),
                         ),
                       ),

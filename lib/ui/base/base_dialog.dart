@@ -47,7 +47,7 @@ abstract class BaseModalDialog extends StatelessWidget {
             child: Text(
               title,
               textAlign: TextAlign.center,
-              style: GoogleFonts.castoro(
+              style: GoogleFonts.fraunces(
                 color: Colors.white,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -67,7 +67,7 @@ abstract class BaseModalDialog extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: GoogleFonts.castoro(
+            style: GoogleFonts.fraunces(
               color: Colors.white,
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -85,10 +85,10 @@ abstract class BaseModalDialog extends StatelessWidget {
     Widget dialogBody = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: const Color(0xFF141414).withValues(alpha: 0.90),
+        color: const Color(0xFF0C1214).withValues(alpha: 0.75),
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.12),
+          color: Colors.white.withValues(alpha: 0.14),
           width: 1.2,
         ),
       ),
@@ -108,10 +108,11 @@ abstract class BaseModalDialog extends StatelessWidget {
                 crossAxisAlignment: isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 14),
-                  if (scrollableContent)
-                    SingleChildScrollView(child: content)
-                  else
-                    content,
+                  RepaintBoundary(
+                    child: scrollableContent
+                        ? SingleChildScrollView(child: content)
+                        : content,
+                  ),
                 ],
               );
             },

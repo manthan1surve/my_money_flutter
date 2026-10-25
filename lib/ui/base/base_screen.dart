@@ -129,7 +129,7 @@ abstract class BaseScreenState<T extends BaseScreen> extends State<T> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppColors.background,
       resizeToAvoidBottomInset: false,
       body: buildBackground(
         context,

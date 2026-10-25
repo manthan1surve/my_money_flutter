@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../models/models.dart';
@@ -71,11 +72,21 @@ class TransactionDetailsDialog extends BaseModalDialog {
         Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.white),
+              icon: Image.asset(
+                'assets/delete.png',
+                color: Colors.white,
+                width: 20,
+                height: 20,
+              ),
               onPressed: () => _confirmDelete(context),
             ),
             IconButton(
-              icon: const Icon(Icons.edit_outlined, color: Colors.white),
+              icon: Image.asset(
+                'assets/edit.png',
+                color: Colors.white,
+                width: 20,
+                height: 20,
+              ),
               onPressed: () => _showEditForm(context),
             ),
           ],
@@ -110,10 +121,10 @@ class TransactionDetailsDialog extends BaseModalDialog {
               ? "${currency.symbol}${transaction.amount.formatIndianCurrency()}"
               : "${isExpense ? '-' : '+'}${currency.symbol}${transaction.amount.formatIndianCurrency()}",
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: GoogleFonts.inter(
             color: amountColor,
             fontSize: 28,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 8),
@@ -217,7 +228,7 @@ class _DeleteConfirmationModal extends BaseModalDialog {
       OutlinedButton(
         style: OutlinedButton.styleFrom(
           side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         ),
         onPressed: () => Navigator.pop(context),
@@ -229,7 +240,7 @@ class _DeleteConfirmationModal extends BaseModalDialog {
           backgroundColor: const Color(0xFFFE0000),
           foregroundColor: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         ),
         onPressed: onConfirm,

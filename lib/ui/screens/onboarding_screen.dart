@@ -117,6 +117,7 @@ class _OnboardingScreenState extends BaseScreenState<OnboardingScreen> {
                   _slides.length,
                   (index) => AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutCubic,
                     margin: const EdgeInsets.only(right: 8),
                     height: 8,
                     width: _currentPage == index ? 24 : 8,

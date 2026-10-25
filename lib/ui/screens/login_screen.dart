@@ -124,7 +124,7 @@ class _LoginScreenState extends BaseScreenState<LoginScreen> {
                 isLogin
                     ? "Enter your credentials to continue"
                     : "Track your finances with ease and elegance",
-                style: GoogleFonts.castoro(
+                style: GoogleFonts.fraunces(
                   fontSize: 13,
                   color: Colors.white.withValues(alpha: 0.55),
                 ),
@@ -205,7 +205,7 @@ class _LoginScreenState extends BaseScreenState<LoginScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     child: Text(
                       "or",
-                      style: GoogleFonts.castoro(
+                      style: GoogleFonts.fraunces(
                         color: Colors.white.withValues(alpha: 0.45),
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -249,7 +249,7 @@ class _LoginScreenState extends BaseScreenState<LoginScreen> {
                   padding: const EdgeInsets.all(4.0),
                   child: RichText(
                     text: TextSpan(
-                      style: GoogleFonts.castoro(
+                      style: GoogleFonts.fraunces(
                         fontSize: 13.5,
                         color: Colors.white.withValues(alpha: 0.6),
                       ),
@@ -303,11 +303,11 @@ class _LoginScreenState extends BaseScreenState<LoginScreen> {
         keyboardType: keyboardType,
         textInputAction: textInputAction,
         onSubmitted: onSubmitted,
-        style: GoogleFonts.castoro(color: Colors.white, fontSize: 15),
+        style: GoogleFonts.fraunces(color: Colors.white, fontSize: 15),
         cursorColor: Colors.white,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: GoogleFonts.castoro(
+          hintStyle: GoogleFonts.fraunces(
             color: Colors.white.withValues(alpha: 0.35),
             fontSize: 14,
           ),

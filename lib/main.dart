@@ -16,9 +16,13 @@ void main() async {
     debugPrint("Firebase init error (if config missing): $e");
   }
 
-  // Pre-load primary font to eliminate layout shifts (FOIT)
+  // Pre-load primary fonts to eliminate layout shifts (FOIT)
   try {
-    GoogleFonts.pendingFonts([GoogleFonts.fraunces()]);
+    GoogleFonts.pendingFonts([
+      GoogleFonts.castoro(),
+      GoogleFonts.fraunces(),
+      GoogleFonts.inter(),
+    ]);
   } catch (_) {}
 
   runApp(

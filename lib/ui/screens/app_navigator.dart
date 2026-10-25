@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/theme.dart';
 import '../../providers/app_provider.dart';
 import 'onboarding_screen.dart';
 import 'login_screen.dart';
@@ -24,6 +25,7 @@ class AppNavigator extends StatelessWidget {
     Widget content;
     if (loading) {
       content = const Scaffold(
+        backgroundColor: AppColors.background,
         key: ValueKey('loading'),
         body: AppBackground(
           child: LoadingSpinner(),
@@ -59,67 +61,78 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: AppColors.background,
       resizeToAvoidBottomInset: false,
       body: AppBackground(
         child: Stack(
           children: [
-            NotificationListener<ScrollNotification>(
-              onNotification: (notification) {
-                // Only toggle FAB visibility for vertical scrolls (ignore tab view swipes or horizontal months list)
-                if (notification.metrics.axis == Axis.vertical) {
-                  if (notification.metrics.pixels <= 10.0) {
-                    // Always show FAB when at the top of the screen
-                    FloatingActionButtonMorph.showNotifier.value = true;
-                  } else if (notification is ScrollUpdateNotification) {
-                    final delta = notification.scrollDelta ?? 0.0;
-                    if (delta > 0.5) {
-                      // Scrolling down -> hide FAB
-                      FloatingActionButtonMorph.showNotifier.value = false;
-                    } else if (delta < -0.5) {
-                      // Scrolling up -> show FAB (only if we are not near/at the end of the screen)
-                      if (notification.metrics.pixels < notification.metrics.maxScrollExtent - 40.0) {
-                        FloatingActionButtonMorph.showNotifier.value = true;
+            // Layer 1: Screen Content (isolated so scrolling doesn't repaint the frosted tab bar or FAB)
+            RepaintBoundary(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  // Only toggle FAB visibility and quench background ticker for vertical scrolls
+                  if (notification.metrics.axis == Axis.vertical) {
+                    if (notification is ScrollStartNotification) {
+                      AppBackground.isScrollingNotifier.value = true;
+                    } else if (notification is ScrollEndNotification) {
+                      AppBackground.isScrollingNotifier.value = false;
+                    }
+
+                    if (notification.metrics.pixels <= 10.0) {
+                      // Always show FAB when at the top of the screen
+                      FloatingActionButtonMorph.showNotifier.value = true;
+                    } else if (notification is ScrollUpdateNotification) {
+                      final delta = notification.scrollDelta ?? 0.0;
+                      if (delta > 0.5) {
+                        // Scrolling down -> hide FAB
+                        FloatingActionButtonMorph.showNotifier.value = false;
+                      } else if (delta < -0.5) {
+                        // Scrolling up -> show FAB (only if we are not near/at the end of the screen)
+                        if (notification.metrics.pixels < notification.metrics.maxScrollExtent - 40.0) {
+                          FloatingActionButtonMorph.showNotifier.value = true;
+                        }
                       }
                     }
                   }
-                }
-                return false; // let the notification bubble up further
-              },
-              child: IndexedStack(
-                index: _currentIndex,
-                children: [
-                  TickerMode(
-                    enabled: _currentIndex == 0,
-                    child: const DashboardScreen(),
-                  ),
-                  TickerMode(
-                    enabled: _currentIndex == 1,
-                    child: const AccountsScreen(),
-                  ),
-                  TickerMode(
-                    enabled: _currentIndex == 2,
-                    child: AnalyticsScreen(isActive: _currentIndex == 2),
-                  ),
-                  TickerMode(
-                    enabled: _currentIndex == 3,
-                    child: const CategoriesScreen(),
-                  ),
-                ],
+                  return false; // let the notification bubble up further
+                },
+                child: IndexedStack(
+                  index: _currentIndex,
+                  children: [
+                    TickerMode(
+                      enabled: _currentIndex == 0,
+                      child: const DashboardScreen(),
+                    ),
+                    TickerMode(
+                      enabled: _currentIndex == 1,
+                      child: const AccountsScreen(),
+                    ),
+                    TickerMode(
+                      enabled: _currentIndex == 2,
+                      child: AnalyticsScreen(isActive: _currentIndex == 2),
+                    ),
+                    TickerMode(
+                      enabled: _currentIndex == 3,
+                      child: const CategoriesScreen(),
+                    ),
+                  ],
+                ),
               ),
             ),
-          CustomTabBar(
-            currentIndex: _currentIndex,
-            onTap: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-              // Always reset FAB to visible when switching tabs
-              FloatingActionButtonMorph.showNotifier.value = true;
-            },
-          ),
-          const FloatingActionButtonMorph(),
-        ],
+            // Layer 2: Frosted Tab Bar
+            CustomTabBar(
+              currentIndex: _currentIndex,
+              onTap: (index) {
+                setState(() {
+                  _currentIndex = index;
+                });
+                // Always reset FAB to visible when switching tabs
+                FloatingActionButtonMorph.showNotifier.value = true;
+              },
+            ),
+            // Layer 3: Floating Action Button
+            const FloatingActionButtonMorph(),
+          ],
       ),
     ),
   );

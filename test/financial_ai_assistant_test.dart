@@ -316,5 +316,273 @@ void main() {
       expect(res.title.toLowerCase(), contains('food'));
       expect(res.matchedTransactions.every((t) => t.categoryId == foodCategory.id), isTrue);
     });
+
+    test('17. Monthly historical general expenses: How much did I spend every month?', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'How much did I spend every month?',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.isPrediction, isFalse);
+      expect(res.monthlySeries.length, greaterThanOrEqualTo(2));
+      expect(res.matchedTransactions.length, 6); // t1, t2, t3, t5, t6, t7
+      expect(res.matchedTransactions.every((t) => t.type == 'expense'), isTrue);
+    });
+
+    test('18. Monthly spending for explicit window: last 3 months', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Show my monthly spending for the last 3 months',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.monthlySeries.length, 3);
+      expect(res.periodLabel, contains('3'));
+    });
+
+    test('19. Average monthly expenditure query', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'What is my average monthly expenditure?',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.heroValue.toLowerCase(), contains('avg'));
+      expect(res.title.toLowerCase(), contains('average'));
+    });
+
+    test('20. Best/worst month query: Which month did I spend the most?', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Which month did I spend the most?',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.heroSubtitle, contains('Best:'));
+      expect(res.heroSubtitle, contains('Worst:'));
+    });
+
+    test('21. Category spending every month: How much did I spend on food every month?', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'How much did I spend on food every month?',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.title.toLowerCase(), contains('food'));
+      expect(res.matchedTransactions.every((t) => t.categoryId == foodCategory.id), isTrue);
+      expect(res.monthlySeries.isNotEmpty, isTrue);
+    });
+
+    test('22. Monthly food spending for last 6 months', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Monthly food spending for last 6 months',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.monthlySeries.length, lessThanOrEqualTo(6));
+      expect(res.matchedTransactions.every((t) => t.categoryId == foodCategory.id), isTrue);
+    });
+
+    test('23. Monthly travel spending', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Show my monthly travel spending',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.title.toLowerCase(), contains('travel'));
+      expect(res.matchedTransactions.every((t) => t.categoryId == travelCategory.id), isTrue);
+    });
+
+    test('24. Monthly income query', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Show my monthly income',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.heroColor, const Color(0xFF00FE06));
+      expect(res.matchedTransactions.every((t) => t.type == 'income'), isTrue);
+    });
+
+    test('25. Monthly savings query: How much did I save each month?', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'How much did I save each month?',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.title.toLowerCase(), contains('savings'));
+      expect(res.insights, isNotEmpty);
+    });
+
+    test('26. Intent Conflict Guard: Food every month -> Historical, not prediction', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Food every month',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.isPrediction, isFalse);
+    });
+
+    test('27. Intent Conflict Guard: Food next month -> Prediction, not historical', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Food next month',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isPrediction, isTrue);
+      expect(res.isMonthlyHistorical, isFalse);
+    });
+
+    test('28. Monthly historical with vs or comparison', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'monthly spending over the last 3 months',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.monthlySeries.length, 3);
+      expect(res.insights, isNotEmpty);
+    });
+
+    test('29. Edge Case: Monthly spending with empty transactions list', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Monthly spending',
+        transactions: [],
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.isMonthlyHistorical, isTrue);
+      expect(res.hasError, isFalse);
+      expect(res.monthlySeries.isEmpty, isTrue);
+      expect(res.matchedTransactions.isEmpty, isTrue);
+    });
+
+    test('30. Edge Case: Empty or blank query returns handled error result', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: '   ',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.hasError, isTrue);
+      expect(res.errorMessage, isNotEmpty);
+    });
+
+    test('31. Which category spending has been increased from all last month', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Which category spending has been increased from all last month',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      // Food: 3000 this month vs 2000 last month -> +1000 (+50.0%)
+      // Travel: 1200 this month vs 1000 last month -> +200 (+20.0%)
+      expect(res.heroValue, contains('1,000'));
+      expect(res.heroValue, contains('50.0%'));
+      expect(res.heroSubtitle?.toLowerCase(), contains('food'));
+      expect(res.heroColor, const Color(0xFFFE0000));
+      expect(res.categoryBreakdown.length, 2);
+      expect(res.categoryBreakdown.first.name.toLowerCase(), contains('food'));
+
+      // Verifies amount and percentage are provided in insights
+      expect(res.insights.any((i) => i.contains('Food') && i.contains('1,000') && i.contains('50.0%')), isTrue);
+      expect(res.insights.any((i) => i.contains('Travel') && i.contains('200') && i.contains('20.0%')), isTrue);
+    });
+
+    test('32. Exact query: which category spending has been increased or decred from all last month,it should give amount and even percentage', () {
+      final res = FinancialAiAssistant.processQuery(
+        query: 'which category spending has been increased or decred from all last month,it should give amount and even percentage',
+        transactions: transactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.heroValue, contains('1,000'));
+      expect(res.heroValue, contains('50.0%'));
+      expect(res.categoryBreakdown.isNotEmpty, isTrue);
+
+      // Both amount and percentage are included
+      expect(res.insights.any((i) => i.contains('Food') && i.contains('50.0%')), isTrue);
+      expect(res.insights.any((i) => i.contains('Travel') && i.contains('20.0%')), isTrue);
+    });
+
+    test('33. Category spending decreased with reduced spending dataset', () {
+      final modifiedTransactions = [
+        ...transactions,
+        // Add a big expense in Travel in August so Travel decreased in September
+        TransactionModel(
+          id: 't_extra_aug',
+          amount: 5000.0,
+          type: 'expense',
+          categoryId: 'c2', // Travel was 6000 in Aug, now 1200 in Sep -> drop of 4800 (-80.0%)
+          accountId: 'a1',
+          note: 'Flight ticket August',
+          date: DateTime(2026, 8, 15).millisecondsSinceEpoch,
+        ),
+      ];
+
+      final res = FinancialAiAssistant.processQuery(
+        query: 'Which category spending decreased from last month',
+        transactions: modifiedTransactions,
+        categories: categories,
+        currency: currency,
+        referenceDate: fixedNow,
+      );
+
+      expect(res.heroValue, contains('4,800'));
+      expect(res.heroValue, contains('80.0%'));
+      expect(res.heroSubtitle?.toLowerCase(), contains('travel'));
+      expect(res.heroColor, const Color(0xFF00FE06));
+      expect(res.insights.any((i) => i.contains('Travel') && i.contains('4,800') && i.contains('80.0%')), isTrue);
+    });
   });
 }
